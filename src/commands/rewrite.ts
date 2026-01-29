@@ -1,30 +1,26 @@
 import { Notice } from 'obsidian';
 import type ClauwritePlugin from '../main';
-import { getActiveEditor } from '../utils/context';
+import { t } from '../i18n';
 
 export function registerRewriteCommand(plugin: ClauwritePlugin): void {
   plugin.addCommand({
     id: 'rewrite',
-    name: '改寫選取內容',
+    name: t('command.rewrite'),
     editorCallback: async (editor) => {
       const selection = editor.getSelection();
 
       if (!selection) {
-        new Notice('請先選取要改寫的內容');
+        new Notice(t('notice.selectContent'));
         return;
       }
 
       const chatView = await plugin.activateChatView();
       if (!chatView) {
-        new Notice('無法開啟對話視窗');
+        new Notice(t('notice.cannotOpenChat'));
         return;
       }
 
-      // Set context mode to selection for this operation
-      chatView.setContextMode('selection');
-
-      const prompt = '請改寫以下內容，使其更清晰易讀，保持原意：';
-      await chatView.sendPromptWithContext(prompt, true); // showReplaceButton = true
+      await chatView.sendPromptWithContext(t('prompt.rewrite'), true);
     },
   });
 }

@@ -15,12 +15,11 @@ export function createClaudeClient(settings: ClauwriteSettings): ClaudeClient {
 }
 
 export function buildSystemPrompt(settings: ClauwriteSettings): string {
-  const languageInstruction = settings.language === 'zh-TW'
-    ? '請使用繁體中文回應。'
-    : 'Please respond in English.';
+  const langInstruction = settings.responseLanguage === 'zh-TW'
+    ? 'Respond in Traditional Chinese (繁體中文).'
+    : 'Respond in English.';
 
-  return `你是一個 Obsidian 筆記助手。你的任務是幫助使用者處理他們的筆記內容。
-${languageInstruction}
-回應時請使用 Markdown 格式，以便在 Obsidian 中正確顯示。
-保持回應簡潔、有條理。`;
+  return `You are an Obsidian note assistant. Help users with their notes.
+${langInstruction}
+Use Markdown formatting. Keep responses concise and well-organized.`;
 }

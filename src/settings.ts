@@ -1,10 +1,10 @@
-import { App, Platform, PluginSettingTab, Setting, Notice } from 'obsidian';
+import { App, Platform, PluginSettingTab, Setting } from 'obsidian';
 import type ClauwritePlugin from './main';
 import { createClaudeClient } from './api/claude';
+import { t, setLanguage } from './i18n';
 
 export type AuthMode = 'api-key' | 'claude-code';
 export type Language = 'zh-TW' | 'en';
-export type ContextMode = 'note' | 'selection';
 
 export interface ClauwriteSettings {
   authMode: AuthMode;
@@ -12,8 +12,8 @@ export interface ClauwriteSettings {
   claudeCodePath: string;
   model: string;
   maxTokens: number;
-  language: Language;
-  contextMode: ContextMode;
+  uiLanguage: Language;
+  responseLanguage: Language;
   isFirstLoad: boolean;
 }
 
@@ -23,8 +23,8 @@ export const DEFAULT_SETTINGS: ClauwriteSettings = {
   claudeCodePath: 'claude',
   model: 'claude-sonnet-4-20250514',
   maxTokens: 4096,
-  language: 'zh-TW',
-  contextMode: 'note',
+  uiLanguage: 'zh-TW',
+  responseLanguage: 'zh-TW',
   isFirstLoad: true,
 };
 
@@ -37,7 +37,6 @@ const AVAILABLE_MODELS = [
 
 export class ClauwriteSettingTab extends PluginSettingTab {
   plugin: ClauwritePlugin;
-  private authModeContainer: HTMLElement | null = null;
   private apiKeySettingEl: HTMLElement | null = null;
   private cliSettingEl: HTMLElement | null = null;
   private cliTestSettingEl: HTMLElement | null = null;
@@ -51,7 +50,7 @@ export class ClauwriteSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: 'Clauwrite 設定' });
+    containerEl.createEl('h2', { text: t('settings.title') });
 
     // Auth Mode Section (hidden on mobile)
     if (Platform.isDesktop) {
@@ -76,7 +75,7 @@ export class ClauwriteSettingTab extends PluginSettingTab {
 
     // Separator
     containerEl.createEl('hr');
-    containerEl.createEl('h3', { text: '模型設定' });
+    containerEl.createEl('h3', { text: t('settings.model') });
 
     // Model Selection
     this.renderModelSetting(containerEl);
@@ -86,23 +85,23 @@ export class ClauwriteSettingTab extends PluginSettingTab {
 
     // Separator
     containerEl.createEl('hr');
-    containerEl.createEl('h3', { text: '偏好設定' });
+    containerEl.createEl('h3', { text: t('settings.preferences') });
 
-    // Language
-    this.renderLanguageSetting(containerEl);
+    // UI Language
+    this.renderUiLanguageSetting(containerEl);
 
-    // Context Mode
-    this.renderContextModeSetting(containerEl);
+    // Response Language
+    this.renderResponseLanguageSetting(containerEl);
   }
 
   private renderAuthModeSection(containerEl: HTMLElement): void {
     new Setting(containerEl)
-      .setName('認證方式')
-      .setDesc('選擇如何連接 Claude API')
+      .setName(t('settings.authMode'))
+      .setDesc(t('settings.authMode.desc'))
       .addDropdown((dropdown) => {
         dropdown
-          .addOption('api-key', 'API Key（適合所有平台）')
-          .addOption('claude-code', 'Claude Code CLI（需先安裝）')
+          .addOption('api-key', t('settings.authMode.apiKey'))
+          .addOption('claude-code', t('settings.authMode.cli'))
           .setValue(this.plugin.settings.authMode)
           .onChange(async (value: AuthMode) => {
             this.plugin.settings.authMode = value;
@@ -114,14 +113,13 @@ export class ClauwriteSettingTab extends PluginSettingTab {
 
   private renderApiKeySetting(containerEl: HTMLElement): void {
     new Setting(containerEl)
-      .setName('API Key')
-      .setDesc('輸入您的 Anthropic API Key')
+      .setName(t('settings.apiKey'))
+      .setDesc(t('settings.apiKey.desc'))
       .addText((text) => {
         text
           .setPlaceholder('sk-ant-...')
           .setValue(this.maskApiKey(this.plugin.settings.apiKey))
           .onChange(async (value) => {
-            // Only update if it's a real change (not masked value)
             if (!value.includes('••••')) {
               this.plugin.settings.apiKey = value;
               await this.plugin.saveSettings();
@@ -140,12 +138,25 @@ export class ClauwriteSettingTab extends PluginSettingTab {
   }
 
   private renderCliPathSetting(containerEl: HTMLElement): void {
+    const descFragment = document.createDocumentFragment();
+    descFragment.appendText(t('settings.cliPath.desc'));
+    descFragment.createEl('br');
+
+    const hintText = t('settings.cliPath.hint', { macCmd: '', winCmd: '' });
+    const parts = hintText.split(/\{macCmd\}|\{winCmd\}/);
+
+    descFragment.appendText(parts[0] || '');
+    descFragment.createEl('code', { text: 'which claude' });
+    descFragment.appendText(parts[1] || '');
+    descFragment.createEl('code', { text: 'where claude' });
+    descFragment.appendText(parts[2] || '');
+
     new Setting(containerEl)
-      .setName('CLI 路徑')
-      .setDesc('Claude Code CLI 的執行路徑')
+      .setName(t('settings.cliPath'))
+      .setDesc(descFragment)
       .addText((text) => {
         text
-          .setPlaceholder('claude')
+          .setPlaceholder('/Users/user/.local/bin/claude')
           .setValue(this.plugin.settings.claudeCodePath)
           .onChange(async (value) => {
             this.plugin.settings.claudeCodePath = value || 'claude';
@@ -156,29 +167,29 @@ export class ClauwriteSettingTab extends PluginSettingTab {
 
   private renderCliTestSetting(containerEl: HTMLElement): void {
     const setting = new Setting(containerEl)
-      .setName('測試連線')
-      .setDesc('驗證 Claude Code CLI 是否可用');
+      .setName(t('settings.testConnection'))
+      .setDesc(t('settings.testConnection.desc'));
 
     const statusEl = containerEl.createSpan({ cls: 'clauwrite-test-status' });
 
     setting.addButton((button) => {
-      button.setButtonText('測試連線').onClick(async () => {
+      button.setButtonText(t('settings.testConnection.button')).onClick(async () => {
         statusEl.empty();
-        statusEl.setText('測試中...');
+        statusEl.setText(t('settings.testConnection.testing'));
         button.setDisabled(true);
 
         try {
           const client = createClaudeClient(this.plugin.settings);
           const success = await client.testConnection();
           if (success) {
-            statusEl.setText('✅ 連線成功');
+            statusEl.setText('✅ ' + t('settings.testConnection.success'));
             statusEl.style.color = 'var(--text-success)';
           } else {
-            statusEl.setText('❌ 連線失敗');
+            statusEl.setText('❌ ' + t('settings.testConnection.failed'));
             statusEl.style.color = 'var(--text-error)';
           }
         } catch (error) {
-          statusEl.setText(`❌ ${error instanceof Error ? error.message : '連線失敗'}`);
+          statusEl.setText(`❌ ${error instanceof Error ? error.message : t('settings.testConnection.failed')}`);
           statusEl.style.color = 'var(--text-error)';
         } finally {
           button.setDisabled(false);
@@ -189,8 +200,8 @@ export class ClauwriteSettingTab extends PluginSettingTab {
 
   private renderModelSetting(containerEl: HTMLElement): void {
     new Setting(containerEl)
-      .setName('Model')
-      .setDesc('選擇要使用的 Claude 模型')
+      .setName(t('settings.model.select'))
+      .setDesc(t('settings.model.desc'))
       .addDropdown((dropdown) => {
         AVAILABLE_MODELS.forEach((model) => {
           dropdown.addOption(model.value, model.name);
@@ -206,8 +217,8 @@ export class ClauwriteSettingTab extends PluginSettingTab {
 
   private renderMaxTokensSetting(containerEl: HTMLElement): void {
     new Setting(containerEl)
-      .setName('Max Tokens')
-      .setDesc('回應的最大 token 數量')
+      .setName(t('settings.maxTokens'))
+      .setDesc(t('settings.maxTokens.desc'))
       .addText((text) => {
         text
           .setPlaceholder('4096')
@@ -225,33 +236,36 @@ export class ClauwriteSettingTab extends PluginSettingTab {
       });
   }
 
-  private renderLanguageSetting(containerEl: HTMLElement): void {
+  private renderUiLanguageSetting(containerEl: HTMLElement): void {
     new Setting(containerEl)
-      .setName('回應語言')
-      .setDesc('Claude 回應的語言')
+      .setName(t('settings.language'))
+      .setDesc(t('settings.language.desc'))
       .addDropdown((dropdown) => {
         dropdown
           .addOption('zh-TW', '繁體中文')
           .addOption('en', 'English')
-          .setValue(this.plugin.settings.language)
+          .setValue(this.plugin.settings.uiLanguage)
           .onChange(async (value: Language) => {
-            this.plugin.settings.language = value;
+            this.plugin.settings.uiLanguage = value;
+            setLanguage(value);
             await this.plugin.saveSettings();
+            // Refresh the settings display
+            this.display();
           });
       });
   }
 
-  private renderContextModeSetting(containerEl: HTMLElement): void {
+  private renderResponseLanguageSetting(containerEl: HTMLElement): void {
     new Setting(containerEl)
-      .setName('預設 Context')
-      .setDesc('預設的內容來源模式')
+      .setName(t('settings.responseLanguage'))
+      .setDesc(t('settings.responseLanguage.desc'))
       .addDropdown((dropdown) => {
         dropdown
-          .addOption('note', '整篇筆記')
-          .addOption('selection', '選取內容')
-          .setValue(this.plugin.settings.contextMode)
-          .onChange(async (value: ContextMode) => {
-            this.plugin.settings.contextMode = value;
+          .addOption('zh-TW', '繁體中文')
+          .addOption('en', 'English')
+          .setValue(this.plugin.settings.responseLanguage)
+          .onChange(async (value: Language) => {
+            this.plugin.settings.responseLanguage = value;
             await this.plugin.saveSettings();
           });
       });

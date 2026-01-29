@@ -3,7 +3,7 @@ import type { ClaudeClient } from './claude';
 import type { ClauwriteSettings } from '../settings';
 import { buildSystemPrompt } from './claude';
 
-const CLI_TIMEOUT = 30000; // 30 seconds
+const CLI_TIMEOUT = 120000; // 120 seconds (2 minutes)
 
 export class ClaudeCodeClient implements ClaudeClient {
   private settings: ClauwriteSettings;
@@ -40,14 +40,21 @@ export class ClaudeCodeClient implements ClaudeClient {
     return new Promise((resolve, reject) => {
       const cliPath = this.settings.claudeCodePath || 'claude';
 
+      console.log('Clauwrite: Executing CLI command:', cliPath, args);
+
       let stdout = '';
       let stderr = '';
       let timedOut = false;
 
       const child = spawn(cliPath, args, {
-        shell: true,
         env: { ...process.env },
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
+
+      // 關閉 stdin，讓 CLI 知道沒有更多輸入
+      if (child.stdin) {
+        child.stdin.end();
+      }
 
       const timeoutId = setTimeout(() => {
         timedOut = true;
@@ -57,14 +64,17 @@ export class ClaudeCodeClient implements ClaudeClient {
 
       child.stdout.on('data', (data: Buffer) => {
         stdout += data.toString();
+        console.log('Clauwrite: stdout chunk received, length:', data.length);
       });
 
       child.stderr.on('data', (data: Buffer) => {
         stderr += data.toString();
+        console.log('Clauwrite: stderr chunk:', data.toString());
       });
 
       child.on('error', (error: NodeJS.ErrnoException) => {
         clearTimeout(timeoutId);
+        console.error('Clauwrite: spawn error:', error);
         if (error.code === 'ENOENT') {
           reject(new Error('找不到 claude 命令，請確認已安裝 Claude Code 或檢查路徑設定'));
         } else {
@@ -74,6 +84,7 @@ export class ClaudeCodeClient implements ClaudeClient {
 
       child.on('close', (code: number | null) => {
         clearTimeout(timeoutId);
+        console.log('Clauwrite: CLI process closed with code:', code);
 
         if (timedOut) {
           return;
@@ -82,8 +93,10 @@ export class ClaudeCodeClient implements ClaudeClient {
         if (code === 0) {
           resolve(stdout.trim());
         } else {
-          const errorMessage = this.parseErrorMessage(stderr || stdout);
-          reject(new Error(errorMessage));
+          const output = stderr || stdout;
+          console.error('Claude CLI error output:', { code, stderr, stdout });
+          const errorMessage = this.parseErrorMessage(output);
+          reject(new Error(errorMessage || `CLI 返回錯誤碼: ${code}`));
         }
       });
     });

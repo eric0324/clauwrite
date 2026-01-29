@@ -5,6 +5,7 @@ import { registerSummarizeCommand } from './commands/summarize';
 import { registerRewriteCommand } from './commands/rewrite';
 import { registerAskCommand } from './commands/ask';
 import { ClaudeCodeClient } from './api/claude-code-cli';
+import { setLanguage, t } from './i18n';
 
 export default class ClauwritePlugin extends Plugin {
   settings: ClauwriteSettings;
@@ -12,6 +13,9 @@ export default class ClauwritePlugin extends Plugin {
   async onload(): Promise<void> {
     // Load settings
     await this.loadSettings();
+
+    // Initialize language
+    setLanguage(this.settings.uiLanguage);
 
     // Register Chat View
     this.registerView(
@@ -53,7 +57,7 @@ export default class ClauwritePlugin extends Plugin {
     // Open Chat command
     this.addCommand({
       id: 'open-chat',
-      name: '開啟對話視窗',
+      name: t('command.openChat'),
       callback: () => {
         this.activateChatView();
       },
@@ -100,15 +104,15 @@ export default class ClauwritePlugin extends Plugin {
 
       if (cliAvailable) {
         this.settings.authMode = 'claude-code';
-        new Notice('Clauwrite: 已偵測到 Claude Code CLI，將使用 CLI 模式');
+        new Notice('Clauwrite: ' + t('notice.cliDetected'));
       } else {
         this.settings.authMode = 'api-key';
-        new Notice('Clauwrite: 請在設定中輸入 API Key 或安裝 Claude Code CLI');
+        new Notice('Clauwrite: ' + t('notice.enterApiKey'));
       }
     } else {
       // Mobile: force API key mode
       this.settings.authMode = 'api-key';
-      new Notice('Clauwrite: 請在設定中輸入 API Key');
+      new Notice('Clauwrite: ' + t('notice.mobileApiKey'));
     }
 
     // Mark first load as complete

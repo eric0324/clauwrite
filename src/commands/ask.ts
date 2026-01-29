@@ -1,6 +1,7 @@
-import { Modal, App, Notice, Setting } from 'obsidian';
+import { Modal, App, Notice } from 'obsidian';
 import type ClauwritePlugin from '../main';
 import { getContext } from '../utils/context';
+import { t } from '../i18n';
 
 class AskModal extends Modal {
   private plugin: ClauwritePlugin;
@@ -16,10 +17,10 @@ class AskModal extends Modal {
     contentEl.empty();
     contentEl.addClass('clauwrite-ask-modal');
 
-    contentEl.createEl('h3', { text: '詢問關於當前內容' });
+    contentEl.createEl('h3', { text: t('prompt.askModal.title') });
 
     const textArea = contentEl.createEl('textarea', {
-      attr: { placeholder: '輸入您的問題...' },
+      attr: { placeholder: t('prompt.askModal.placeholder') },
     });
     textArea.addEventListener('input', () => {
       this.question = textArea.value;
@@ -33,26 +34,25 @@ class AskModal extends Modal {
 
     const buttonContainer = contentEl.createDiv({ cls: 'clauwrite-ask-modal-buttons' });
 
-    const cancelBtn = buttonContainer.createEl('button', { text: '取消' });
+    const cancelBtn = buttonContainer.createEl('button', { text: t('prompt.askModal.cancel') });
     cancelBtn.addEventListener('click', () => {
       this.close();
     });
 
     const submitBtn = buttonContainer.createEl('button', {
-      text: '送出',
+      text: t('prompt.askModal.submit'),
       cls: 'mod-cta',
     });
     submitBtn.addEventListener('click', () => {
       this.submitQuestion();
     });
 
-    // Focus the textarea
     setTimeout(() => textArea.focus(), 10);
   }
 
   private async submitQuestion(): Promise<void> {
     if (!this.question.trim()) {
-      new Notice('請輸入問題');
+      new Notice(t('notice.enterQuestion'));
       return;
     }
 
@@ -60,12 +60,11 @@ class AskModal extends Modal {
 
     const chatView = await this.plugin.activateChatView();
     if (!chatView) {
-      new Notice('無法開啟對話視窗');
+      new Notice(t('notice.cannotOpenChat'));
       return;
     }
 
-    const context = getContext(this.plugin.app, this.plugin.settings.contextMode);
-    const prompt = `根據以下內容回答問題。\n\n問題：${this.question.trim()}`;
+    const prompt = t('prompt.ask', { question: this.question.trim() });
 
     await chatView.sendPromptWithContext(prompt);
   }
@@ -79,12 +78,12 @@ class AskModal extends Modal {
 export function registerAskCommand(plugin: ClauwritePlugin): void {
   plugin.addCommand({
     id: 'ask',
-    name: '詢問關於當前內容',
+    name: t('command.ask'),
     callback: async () => {
-      const context = getContext(plugin.app, plugin.settings.contextMode);
+      const context = getContext(plugin.app);
 
       if (!context) {
-        new Notice('請先開啟筆記或選取內容');
+        new Notice(t('notice.openNote'));
         return;
       }
 

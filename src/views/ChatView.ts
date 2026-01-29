@@ -5,9 +5,9 @@ import {
   setIcon,
 } from 'obsidian';
 import type ClauwritePlugin from '../main';
-import type { ContextMode } from '../settings';
 import { getContext, replaceSelection, getActiveEditor } from '../utils/context';
 import { createClaudeClient } from '../api/claude';
+import { t } from '../i18n';
 
 export const CHAT_VIEW_TYPE = 'clauwrite-chat-view';
 
@@ -23,17 +23,15 @@ export class ChatView extends ItemView {
   private inputEl: HTMLTextAreaElement;
   private sendButton: HTMLButtonElement;
   private contextIndicatorEl: HTMLElement;
-  private contextModeSelect: HTMLSelectElement;
   private loadingEl: HTMLElement;
+  private loadingTextEl: HTMLElement;
   private messages: ChatMessage[] = [];
   private isLoading = false;
-  private currentContextMode: ContextMode;
   private lastSelectionContent: string | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: ClauwritePlugin) {
     super(leaf);
     this.plugin = plugin;
-    this.currentContextMode = plugin.settings.contextMode;
   }
 
   getViewType(): string {
@@ -41,7 +39,7 @@ export class ChatView extends ItemView {
   }
 
   getDisplayText(): string {
-    return 'Clauwrite';
+    return t('chat.title');
   }
 
   getIcon(): string {
@@ -68,12 +66,11 @@ export class ChatView extends ItemView {
   private renderHeader(container: Element): void {
     const header = container.createDiv({ cls: 'clauwrite-header' });
 
-    header.createSpan({ cls: 'clauwrite-header-title', text: 'Clauwrite' });
+    header.createSpan({ cls: 'clauwrite-header-title', text: t('chat.title') });
 
     const settingsIcon = header.createSpan({ cls: 'clauwrite-header-settings' });
     setIcon(settingsIcon, 'settings');
     settingsIcon.addEventListener('click', () => {
-      // Open settings tab
       (this.app as any).setting.open();
       (this.app as any).setting.openTabById('clauwrite');
     });
@@ -81,25 +78,7 @@ export class ChatView extends ItemView {
 
   private renderContextIndicator(container: Element): void {
     const contextDiv = container.createDiv({ cls: 'clauwrite-context' });
-
     this.contextIndicatorEl = contextDiv.createDiv({ cls: 'clauwrite-context-label' });
-
-    const controls = contextDiv.createDiv({ cls: 'clauwrite-context-controls' });
-
-    this.contextModeSelect = controls.createEl('select');
-    this.contextModeSelect.createEl('option', { value: 'note', text: '整篇筆記' });
-    this.contextModeSelect.createEl('option', { value: 'selection', text: '選取內容' });
-    this.contextModeSelect.value = this.currentContextMode;
-    this.contextModeSelect.addEventListener('change', () => {
-      this.currentContextMode = this.contextModeSelect.value as ContextMode;
-      this.updateContextIndicator();
-    });
-
-    const clearBtn = controls.createSpan({ cls: 'clauwrite-context-clear', text: '清除' });
-    clearBtn.addEventListener('click', () => {
-      this.lastSelectionContent = null;
-      this.updateContextIndicator();
-    });
   }
 
   private renderMessages(container: Element): void {
@@ -113,7 +92,7 @@ export class ChatView extends ItemView {
     dotsContainer.createSpan({ cls: 'clauwrite-loading-dot' });
     dotsContainer.createSpan({ cls: 'clauwrite-loading-dot' });
     dotsContainer.createSpan({ cls: 'clauwrite-loading-dot' });
-    this.loadingEl.createSpan({ text: '思考中...' });
+    this.loadingTextEl = this.loadingEl.createSpan({ text: t('chat.thinking') });
   }
 
   private renderInputArea(container: Element): void {
@@ -121,7 +100,11 @@ export class ChatView extends ItemView {
 
     this.inputEl = inputArea.createEl('textarea', {
       cls: 'clauwrite-input',
-      attr: { placeholder: '輸入訊息...' },
+      attr: { placeholder: t('chat.input.placeholder') },
+    });
+
+    this.inputEl.addEventListener('focus', () => {
+      this.updateContextIndicator();
     });
 
     this.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
@@ -133,7 +116,7 @@ export class ChatView extends ItemView {
 
     this.sendButton = inputArea.createEl('button', {
       cls: 'clauwrite-send-button',
-      text: '送出',
+      text: t('chat.send'),
     });
 
     this.sendButton.addEventListener('click', () => {
@@ -142,11 +125,12 @@ export class ChatView extends ItemView {
   }
 
   private updateContextIndicator(): void {
-    const context = getContext(this.app, this.currentContextMode);
+    const context = getContext(this.app);
     if (context) {
-      this.contextIndicatorEl.setText(`Context: ${context.source}`);
+      const source = context.source === '選取內容' ? t('chat.context.selection') : context.source;
+      this.contextIndicatorEl.setText(`${t('chat.context')}: ${source}`);
     } else {
-      this.contextIndicatorEl.setText('Context: 無');
+      this.contextIndicatorEl.setText(`${t('chat.context')}: ${t('chat.context.none')}`);
     }
   }
 
@@ -156,10 +140,13 @@ export class ChatView extends ItemView {
       return;
     }
 
+    this.updateContextIndicator();
+
     this.inputEl.value = '';
     this.addMessage('user', message);
 
-    const context = getContext(this.app, this.currentContextMode);
+    const context = getContext(this.app);
+    console.log('Clauwrite: sending with context:', context?.source || 'none');
 
     await this.sendToClaudeWithContext(message, context?.content);
   }
@@ -172,7 +159,7 @@ export class ChatView extends ItemView {
       const response = await client.sendMessage(prompt, context);
       this.addMessage('assistant', response);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '發生未知錯誤';
+      const errorMessage = this.extractErrorMessage(error);
       this.addMessage('error', errorMessage);
     } finally {
       this.setLoading(false);
@@ -182,11 +169,11 @@ export class ChatView extends ItemView {
   async sendPromptWithContext(prompt: string, showReplaceButton = false): Promise<void> {
     this.addMessage('user', prompt);
 
-    const context = getContext(this.app, this.currentContextMode);
+    const context = getContext(this.app);
 
     // Store selection for replace functionality
-    if (showReplaceButton && this.currentContextMode === 'selection') {
-      this.lastSelectionContent = context?.content || null;
+    if (showReplaceButton && context?.source === '選取內容') {
+      this.lastSelectionContent = context.content;
     }
 
     this.setLoading(true);
@@ -196,7 +183,7 @@ export class ChatView extends ItemView {
       const response = await client.sendMessage(prompt, context?.content);
       this.addMessage('assistant', response, showReplaceButton);
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : '發生未知錯誤';
+      const errorMessage = this.extractErrorMessage(error);
       this.addMessage('error', errorMessage);
     } finally {
       this.setLoading(false);
@@ -223,7 +210,11 @@ export class ChatView extends ItemView {
         cls: `clauwrite-message clauwrite-message-${msg.role}`,
       });
 
-      const roleLabel = msg.role === 'user' ? 'You' : msg.role === 'assistant' ? 'Claude' : 'Error';
+      const roleLabel = msg.role === 'user'
+        ? t('chat.you')
+        : msg.role === 'assistant'
+          ? t('chat.claude')
+          : t('chat.error');
       messageEl.createDiv({ cls: 'clauwrite-message-role', text: roleLabel });
 
       const contentEl = messageEl.createDiv({ cls: 'clauwrite-message-content' });
@@ -243,7 +234,7 @@ export class ChatView extends ItemView {
       if (msg.role === 'assistant' && msg.showReplaceButton && this.lastSelectionContent) {
         const replaceBtn = messageEl.createEl('button', {
           cls: 'clauwrite-replace-button',
-          text: '取代選取內容',
+          text: t('chat.replace'),
         });
         replaceBtn.addEventListener('click', () => {
           const editor = getActiveEditor(this.app);
@@ -267,13 +258,26 @@ export class ChatView extends ItemView {
     this.sendButton.disabled = loading;
 
     if (loading) {
+      this.loadingTextEl.setText(t('chat.thinking'));
       this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
     }
   }
 
-  setContextMode(mode: ContextMode): void {
-    this.currentContextMode = mode;
-    this.contextModeSelect.value = mode;
-    this.updateContextIndicator();
+  private extractErrorMessage(error: unknown): string {
+    console.error('Clauwrite error:', error);
+
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+    if (typeof error === 'string' && error) {
+      return error;
+    }
+    if (error && typeof error === 'object' && 'message' in error) {
+      const msg = (error as { message: unknown }).message;
+      if (typeof msg === 'string' && msg) {
+        return msg;
+      }
+    }
+    return t('error.unknown');
   }
 }
