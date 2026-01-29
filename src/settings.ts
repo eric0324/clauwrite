@@ -1,4 +1,4 @@
-import { App, Platform, PluginSettingTab, Setting } from 'obsidian';
+import { App, Platform, PluginSettingTab, Setting, Notice } from 'obsidian';
 import type ClauwritePlugin from './main';
 import { createClaudeClient } from './api/claude';
 import { t, setLanguage } from './i18n';
@@ -13,6 +13,12 @@ export interface PromptTemplates {
   ask: string;
 }
 
+export interface ConversationMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp: number;
+}
+
 export interface ClauwriteSettings {
   authMode: AuthMode;
   apiKey: string;
@@ -22,11 +28,21 @@ export interface ClauwriteSettings {
   uiLanguage: Language;
   responseLanguage: Language;
   prompts: PromptTemplates;
+  maxHistoryLength: number;
+  conversationHistory: ConversationMessage[];
   isFirstLoad: boolean;
 }
 
 export const DEFAULT_PROMPTS: PromptTemplates = {
-  system: 'You are an Obsidian note assistant. Help users with their notes.\nUse Markdown formatting. Keep responses concise and well-organized.',
+  system: `You are an Obsidian note assistant. Help users with their notes.
+Use Markdown formatting. Keep responses concise and well-organized.
+
+When the user asks you to edit or modify the current file, respond with the complete new content wrapped in:
+<<<APPLY_EDIT>>>
+(new file content here)
+<<<END_EDIT>>>
+
+Only use this format when the user explicitly asks to modify/edit/update the file. For questions or discussions, respond normally.`,
   summarize: 'Please provide a concise summary of the following content:',
   rewrite: 'Please rewrite the following content to be clearer and more readable while preserving the meaning:',
   ask: 'Answer the question based on the following content.\n\nQuestion: {{question}}',
@@ -41,6 +57,8 @@ export const DEFAULT_SETTINGS: ClauwriteSettings = {
   uiLanguage: 'zh-TW',
   responseLanguage: 'zh-TW',
   prompts: { ...DEFAULT_PROMPTS },
+  maxHistoryLength: 20,
+  conversationHistory: [],
   isFirstLoad: true,
 };
 
@@ -115,6 +133,13 @@ export class ClauwriteSettingTab extends PluginSettingTab {
 
     // Prompt Templates
     this.renderPromptSettings(containerEl);
+
+    // Separator
+    containerEl.createEl('hr');
+    containerEl.createEl('h3', { text: t('settings.conversation') });
+
+    // Conversation Settings
+    this.renderConversationSettings(containerEl);
   }
 
   private renderAuthModeSection(containerEl: HTMLElement): void {
@@ -364,6 +389,42 @@ export class ClauwriteSettingTab extends PluginSettingTab {
             this.plugin.settings.prompts = { ...DEFAULT_PROMPTS };
             await this.plugin.saveSettings();
             this.display();
+          });
+      });
+  }
+
+  private renderConversationSettings(containerEl: HTMLElement): void {
+    // Max History Length
+    new Setting(containerEl)
+      .setName(t('settings.maxHistory'))
+      .setDesc(t('settings.maxHistory.desc'))
+      .addText((text) => {
+        text
+          .setPlaceholder('20')
+          .setValue(String(this.plugin.settings.maxHistoryLength))
+          .onChange(async (value) => {
+            const num = parseInt(value, 10);
+            if (!isNaN(num) && num >= 0) {
+              this.plugin.settings.maxHistoryLength = num;
+              await this.plugin.saveSettings();
+            }
+          });
+        text.inputEl.type = 'number';
+        text.inputEl.min = '0';
+        text.inputEl.max = '100';
+      });
+
+    // Clear History
+    new Setting(containerEl)
+      .setName(t('settings.clearHistory'))
+      .setDesc(t('settings.clearHistory.desc'))
+      .addButton((button) => {
+        button
+          .setButtonText(t('settings.clearHistory.button'))
+          .onClick(async () => {
+            this.plugin.settings.conversationHistory = [];
+            await this.plugin.saveSettings();
+            new Notice(t('settings.clearHistory.done'));
           });
       });
   }

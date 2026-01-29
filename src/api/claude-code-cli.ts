@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
 import type { ClaudeClient } from './claude';
-import type { ClauwriteSettings } from '../settings';
+import type { ClauwriteSettings, ConversationMessage } from '../settings';
 import { buildSystemPrompt } from './claude';
 
 const CLI_TIMEOUT = 120000; // 120 seconds (2 minutes)
@@ -12,19 +12,42 @@ export class ClaudeCodeClient implements ClaudeClient {
     this.settings = settings;
   }
 
-  async sendMessage(prompt: string, context?: string): Promise<string> {
-    return this.sendMessageStream(prompt, context, () => {});
+  async sendMessage(prompt: string, context?: string, history?: ConversationMessage[]): Promise<string> {
+    return this.sendMessageStream(prompt, context, history || [], () => {});
   }
 
   async sendMessageStream(
     prompt: string,
     context: string | undefined,
-    onChunk: (chunk: string) => void
+    history: ConversationMessage[],
+    onChunk: (chunk: string) => void,
+    fileInfo?: { path?: string; fullContent?: string }
   ): Promise<string> {
     const systemPrompt = buildSystemPrompt(this.settings);
+
+    // Build conversation history into prompt
+    let historyText = '';
+    if (history.length > 0) {
+      historyText = '\n\n---\nPrevious conversation:\n';
+      for (const msg of history) {
+        const role = msg.role === 'user' ? 'User' : 'Assistant';
+        historyText += `${role}: ${msg.content}\n\n`;
+      }
+      historyText += '---\n\n';
+    }
+
+    // Add file info if available
+    let fileInfoText = '';
+    if (fileInfo?.path) {
+      fileInfoText = `\n\nCurrent file: ${fileInfo.path}`;
+      if (fileInfo.fullContent) {
+        fileInfoText += `\n\nFull file content:\n\`\`\`\n${fileInfo.fullContent}\n\`\`\``;
+      }
+    }
+
     const fullPrompt = context
-      ? `${systemPrompt}\n\n---\n\nUser request: ${prompt}\n\n---\n\nContent:\n${context}`
-      : `${systemPrompt}\n\n---\n\n${prompt}`;
+      ? `${systemPrompt}${historyText}${fileInfoText}\n\nUser request: ${prompt}\n\n---\n\nSelected content:\n${context}`
+      : `${systemPrompt}${historyText}${fileInfoText}\n\n${prompt}`;
 
     const args = ['-p', fullPrompt, '--output-format', 'text'];
 

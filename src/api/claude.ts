@@ -1,10 +1,21 @@
-import type { ClauwriteSettings } from '../settings';
+import type { ClauwriteSettings, ConversationMessage } from '../settings';
 import { AnthropicApiClient } from './anthropic-api';
 import { ClaudeCodeClient } from './claude-code-cli';
 
+export interface FileInfo {
+  path?: string;
+  fullContent?: string;
+}
+
 export interface ClaudeClient {
-  sendMessage(prompt: string, context?: string): Promise<string>;
-  sendMessageStream(prompt: string, context: string | undefined, onChunk: (chunk: string) => void): Promise<string>;
+  sendMessage(prompt: string, context?: string, history?: ConversationMessage[]): Promise<string>;
+  sendMessageStream(
+    prompt: string,
+    context: string | undefined,
+    history: ConversationMessage[],
+    onChunk: (chunk: string) => void,
+    fileInfo?: FileInfo
+  ): Promise<string>;
   testConnection(): Promise<boolean>;
 }
 

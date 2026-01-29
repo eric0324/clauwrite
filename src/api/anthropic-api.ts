@@ -1,6 +1,6 @@
 import { requestUrl, RequestUrlParam } from 'obsidian';
-import type { ClaudeClient } from './claude';
-import type { ClauwriteSettings } from '../settings';
+import type { ClaudeClient, FileInfo } from './claude';
+import type { ClauwriteSettings, ConversationMessage } from '../settings';
 import { buildSystemPrompt } from './claude';
 
 interface AnthropicMessage {
@@ -37,34 +37,58 @@ export class AnthropicApiClient implements ClaudeClient {
   async sendMessageStream(
     prompt: string,
     context: string | undefined,
-    onChunk: (chunk: string) => void
+    history: ConversationMessage[],
+    onChunk: (chunk: string) => void,
+    fileInfo?: FileInfo
   ): Promise<string> {
     // API mode doesn't support streaming with Obsidian's requestUrl
     // Fall back to regular request and emit full response at once
-    const response = await this.sendMessage(prompt, context);
+    const response = await this.sendMessage(prompt, context, history, fileInfo);
     onChunk(response);
     return response;
   }
 
-  async sendMessage(prompt: string, context?: string): Promise<string> {
+  async sendMessage(prompt: string, context?: string, history?: ConversationMessage[], fileInfo?: FileInfo): Promise<string> {
     if (!this.settings.apiKey) {
-      throw new Error('API Key 未設定，請在設定中輸入您的 Anthropic API Key');
+      throw new Error('API Key not set. Please enter your Anthropic API Key in settings.');
     }
 
     const systemPrompt = buildSystemPrompt(this.settings);
+
+    // Add file info if available
+    let fileInfoText = '';
+    if (fileInfo?.path) {
+      fileInfoText = `\n\nCurrent file: ${fileInfo.path}`;
+      if (fileInfo.fullContent) {
+        fileInfoText += `\n\nFull file content:\n\`\`\`\n${fileInfo.fullContent}\n\`\`\``;
+      }
+    }
+
     const userContent = context
-      ? `${prompt}\n\n---\n\n${context}`
-      : prompt;
+      ? `${prompt}${fileInfoText}\n\n---\n\nSelected content:\n${context}`
+      : `${prompt}${fileInfoText}`;
+
+    // Build messages array with history
+    const messages: AnthropicMessage[] = [];
+
+    if (history && history.length > 0) {
+      for (const msg of history) {
+        messages.push({
+          role: msg.role,
+          content: msg.content,
+        });
+      }
+    }
+
+    messages.push({
+      role: 'user',
+      content: userContent,
+    });
 
     const requestBody: AnthropicRequest = {
       model: this.settings.model,
       max_tokens: this.settings.maxTokens,
-      messages: [
-        {
-          role: 'user',
-          content: userContent,
-        },
-      ],
+      messages,
       system: systemPrompt,
     };
 
@@ -88,7 +112,7 @@ export class AnthropicApiClient implements ClaudeClient {
       }
 
       if (!data.content || data.content.length === 0) {
-        throw new Error('回應內容為空');
+        throw new Error('Empty response');
       }
 
       return data.content[0].text;
@@ -99,11 +123,10 @@ export class AnthropicApiClient implements ClaudeClient {
 
   async testConnection(): Promise<boolean> {
     if (!this.settings.apiKey) {
-      throw new Error('API Key 未設定');
+      throw new Error('API Key not set');
     }
 
     try {
-      // Send a minimal request to verify the API key
       const requestBody: AnthropicRequest = {
         model: this.settings.model,
         max_tokens: 10,
@@ -135,28 +158,27 @@ export class AnthropicApiClient implements ClaudeClient {
 
   private handleError(error: unknown): Error {
     if (error instanceof Error) {
-      // Check for specific HTTP status codes
       const message = error.message.toLowerCase();
 
       if (message.includes('401') || message.includes('unauthorized')) {
-        return new Error('API Key 無效，請在設定中檢查');
+        return new Error('Invalid API Key. Please check settings.');
       }
 
       if (message.includes('429') || message.includes('rate')) {
-        return new Error('請求過於頻繁，請稍後再試');
+        return new Error('Rate limited. Please try again later.');
       }
 
       if (message.includes('500') || message.includes('502') || message.includes('503')) {
-        return new Error('伺服器錯誤，請稍後再試');
+        return new Error('Server error. Please try again later.');
       }
 
       if (message.includes('network') || message.includes('fetch') || message.includes('econnrefused')) {
-        return new Error('網路連線失敗，請檢查網路');
+        return new Error('Network connection failed. Please check your internet.');
       }
 
       return error;
     }
 
-    return new Error('發生未知錯誤');
+    return new Error('Unknown error occurred');
   }
 }

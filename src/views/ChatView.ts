@@ -2,11 +2,14 @@ import {
   ItemView,
   WorkspaceLeaf,
   MarkdownRenderer,
+  MarkdownView,
   setIcon,
+  Notice,
 } from 'obsidian';
 import type ClauwritePlugin from '../main';
+import type { ConversationMessage } from '../settings';
 import { getContext, replaceSelection, getActiveEditor } from '../utils/context';
-import { createClaudeClient } from '../api/claude';
+import { createClaudeClient, FileInfo } from '../api/claude';
 import { t } from '../i18n';
 
 export const CHAT_VIEW_TYPE = 'clauwrite-chat-view';
@@ -58,11 +61,14 @@ export class ChatView extends ItemView {
     this.renderMessages(container);
     this.renderInputArea(container);
 
+    // Load saved conversation history
+    this.loadConversationHistory();
     this.updateContextIndicator();
   }
 
   async onClose(): Promise<void> {
-    this.messages = [];
+    // Save conversation before closing
+    await this.saveConversationHistory();
   }
 
   private renderHeader(container: Element): void {
@@ -70,7 +76,18 @@ export class ChatView extends ItemView {
 
     header.createSpan({ cls: 'clauwrite-header-title', text: t('chat.title') });
 
-    const settingsIcon = header.createSpan({ cls: 'clauwrite-header-settings' });
+    const actions = header.createDiv({ cls: 'clauwrite-header-actions' });
+
+    // New chat button
+    const newChatIcon = actions.createSpan({ cls: 'clauwrite-header-icon' });
+    setIcon(newChatIcon, 'plus');
+    newChatIcon.setAttribute('aria-label', t('chat.newChat'));
+    newChatIcon.addEventListener('click', () => {
+      this.clearConversation();
+    });
+
+    // Settings button
+    const settingsIcon = actions.createSpan({ cls: 'clauwrite-header-icon' });
     setIcon(settingsIcon, 'settings');
     settingsIcon.addEventListener('click', () => {
       (this.app as any).setting.open();
@@ -110,7 +127,7 @@ export class ChatView extends ItemView {
     });
 
     this.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         this.sendMessage();
       }
@@ -136,6 +153,53 @@ export class ChatView extends ItemView {
     }
   }
 
+  private loadConversationHistory(): void {
+    const history = this.plugin.settings.conversationHistory;
+    this.messages = history.map(msg => ({
+      role: msg.role,
+      content: msg.content,
+      showReplaceButton: false,
+    }));
+    this.renderMessageList();
+  }
+
+  private async saveConversationHistory(): Promise<void> {
+    // Convert messages to ConversationMessage format (exclude errors)
+    const history: ConversationMessage[] = this.messages
+      .filter(msg => msg.role !== 'error')
+      .map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content,
+        timestamp: Date.now(),
+      }));
+
+    // Limit history length
+    const maxLength = this.plugin.settings.maxHistoryLength;
+    if (history.length > maxLength) {
+      history.splice(0, history.length - maxLength);
+    }
+
+    this.plugin.settings.conversationHistory = history;
+    await this.plugin.saveSettings();
+  }
+
+  private async clearConversation(): Promise<void> {
+    this.messages = [];
+    this.plugin.settings.conversationHistory = [];
+    await this.plugin.saveSettings();
+    this.renderMessageList();
+  }
+
+  private getConversationHistory(): ConversationMessage[] {
+    return this.messages
+      .filter(msg => msg.role !== 'error')
+      .map(msg => ({
+        role: msg.role as 'user' | 'assistant',
+        content: msg.content,
+        timestamp: Date.now(),
+      }));
+  }
+
   async sendMessage(): Promise<void> {
     const message = this.inputEl.value.trim();
     if (!message || this.isLoading) {
@@ -148,11 +212,24 @@ export class ChatView extends ItemView {
     this.addMessage('user', message);
 
     const context = getContext(this.app);
+    const history = this.getConversationHistory().slice(0, -1); // Exclude the message we just added
 
-    await this.sendToClaudeStream(message, context?.content);
+    // Prepare file info for Claude to edit
+    const fileInfo: FileInfo | undefined = context?.filePath ? {
+      path: context.filePath,
+      fullContent: context.fullContent,
+    } : undefined;
+
+    await this.sendToClaudeStream(message, context?.content, history, false, fileInfo);
   }
 
-  async sendToClaudeStream(prompt: string, context?: string, showReplaceButton = false): Promise<void> {
+  async sendToClaudeStream(
+    prompt: string,
+    context?: string,
+    history?: ConversationMessage[],
+    showReplaceButton = false,
+    fileInfo?: FileInfo
+  ): Promise<void> {
     this.setLoading(true);
     this.startStreamingMessage();
 
@@ -160,12 +237,24 @@ export class ChatView extends ItemView {
 
     try {
       const client = createClaudeClient(this.plugin.settings);
-      fullResponse = await client.sendMessageStream(prompt, context, (chunk) => {
-        fullResponse += '';
+      fullResponse = await client.sendMessageStream(prompt, context, history || [], (chunk) => {
         this.updateStreamingMessage(chunk);
-      });
+      }, fileInfo);
 
-      this.finishStreamingMessage(fullResponse, showReplaceButton);
+      // Parse edit blocks from response
+      const { displayContent, editContent } = this.parseEditBlocks(fullResponse);
+
+      // Apply edit if present
+      if (editContent) {
+        await this.applyEditToFile(editContent);
+      }
+
+      // Display the response (without edit blocks)
+      const contentToDisplay = displayContent || fullResponse;
+      this.finishStreamingMessage(contentToDisplay, showReplaceButton);
+
+      // Save conversation after successful response
+      await this.saveConversationHistory();
     } catch (error) {
       this.cancelStreamingMessage();
       const errorMessage = this.extractErrorMessage(error);
@@ -184,11 +273,18 @@ export class ChatView extends ItemView {
       this.lastSelectionContent = context.content;
     }
 
-    await this.sendToClaudeStream(prompt, context?.content, showReplaceButton);
+    const history = this.getConversationHistory().slice(0, -1);
+
+    // Prepare file info for Claude to edit
+    const fileInfo: FileInfo | undefined = context?.filePath ? {
+      path: context.filePath,
+      fullContent: context.fullContent,
+    } : undefined;
+
+    await this.sendToClaudeStream(prompt, context?.content, history, showReplaceButton, fileInfo);
   }
 
   private startStreamingMessage(): void {
-    // Create streaming message element
     this.streamingMessageEl = this.messagesEl.createDiv({
       cls: 'clauwrite-message clauwrite-message-assistant clauwrite-message-streaming',
     });
@@ -196,7 +292,6 @@ export class ChatView extends ItemView {
     this.streamingMessageEl.createDiv({ cls: 'clauwrite-message-role', text: t('chat.claude') });
     this.streamingContentEl = this.streamingMessageEl.createDiv({ cls: 'clauwrite-message-content' });
 
-    // Insert before loading indicator
     this.messagesEl.insertBefore(this.streamingMessageEl, this.loadingEl);
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }
@@ -204,21 +299,17 @@ export class ChatView extends ItemView {
   private updateStreamingMessage(chunk: string): void {
     if (!this.streamingContentEl) return;
 
-    // Append text directly for streaming effect
     const currentText = this.streamingContentEl.getText() + chunk;
     this.streamingContentEl.setText(currentText);
 
-    // Scroll to bottom
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }
 
   private finishStreamingMessage(finalContent: string, showReplaceButton: boolean): void {
     if (!this.streamingMessageEl || !this.streamingContentEl) return;
 
-    // Remove streaming class
     this.streamingMessageEl.removeClass('clauwrite-message-streaming');
 
-    // Clear and render as markdown
     this.streamingContentEl.empty();
     MarkdownRenderer.renderMarkdown(
       finalContent,
@@ -227,7 +318,6 @@ export class ChatView extends ItemView {
       this
     );
 
-    // Add replace button if needed
     if (showReplaceButton && this.lastSelectionContent) {
       const replaceBtn = this.streamingMessageEl.createEl('button', {
         cls: 'clauwrite-replace-button',
@@ -242,10 +332,8 @@ export class ChatView extends ItemView {
       });
     }
 
-    // Add to messages array
     this.messages.push({ role: 'assistant', content: finalContent, showReplaceButton });
 
-    // Clean up
     this.streamingMessageEl = null;
     this.streamingContentEl = null;
   }
@@ -264,7 +352,6 @@ export class ChatView extends ItemView {
   }
 
   private renderMessageList(): void {
-    // Clear all messages except loading indicator and streaming message
     const children = Array.from(this.messagesEl.children);
     children.forEach((child) => {
       if (!child.hasClass('clauwrite-loading') && !child.hasClass('clauwrite-message-streaming')) {
@@ -272,7 +359,6 @@ export class ChatView extends ItemView {
       }
     });
 
-    // Render all messages
     this.messages.forEach((msg) => {
       const messageEl = this.messagesEl.createDiv({
         cls: `clauwrite-message clauwrite-message-${msg.role}`,
@@ -298,7 +384,6 @@ export class ChatView extends ItemView {
         );
       }
 
-      // Add replace button for assistant messages if needed
       if (msg.role === 'assistant' && msg.showReplaceButton && this.lastSelectionContent) {
         const replaceBtn = messageEl.createEl('button', {
           cls: 'clauwrite-replace-button',
@@ -312,11 +397,9 @@ export class ChatView extends ItemView {
         });
       }
 
-      // Insert before loading indicator
       this.messagesEl.insertBefore(messageEl, this.loadingEl);
     });
 
-    // Scroll to bottom
     this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
   }
 
@@ -347,5 +430,57 @@ export class ChatView extends ItemView {
       }
     }
     return t('error.unknown');
+  }
+
+  /**
+   * Parse edit blocks from Claude's response
+   */
+  private parseEditBlocks(response: string): { displayContent: string; editContent: string | null } {
+    const editPattern = /<<<APPLY_EDIT>>>\n?([\s\S]*?)\n?<<<END_EDIT>>>/g;
+    const matches = [...response.matchAll(editPattern)];
+
+    if (matches.length === 0) {
+      return { displayContent: response, editContent: null };
+    }
+
+    // Extract the edit content (use the last match if multiple)
+    const editContent = matches[matches.length - 1][1].trim();
+
+    // Remove edit blocks from display content
+    const displayContent = response.replace(editPattern, '').trim();
+
+    return { displayContent, editContent };
+  }
+
+  /**
+   * Apply edit to the current file
+   */
+  private async applyEditToFile(newContent: string): Promise<boolean> {
+    // Find the active markdown view
+    let markdownView: MarkdownView | null = this.app.workspace.getActiveViewOfType(MarkdownView);
+
+    if (!markdownView) {
+      // Try to find any markdown view
+      this.app.workspace.iterateAllLeaves((leaf) => {
+        if (!markdownView && leaf.view instanceof MarkdownView) {
+          markdownView = leaf.view;
+        }
+      });
+    }
+
+    if (!markdownView || !markdownView.file) {
+      new Notice(t('error.noActiveFile'));
+      return false;
+    }
+
+    try {
+      await this.app.vault.modify(markdownView.file, newContent);
+      new Notice(t('chat.fileUpdated'));
+      return true;
+    } catch (error) {
+      console.error('Failed to apply edit:', error);
+      new Notice(t('error.editFailed'));
+      return false;
+    }
   }
 }

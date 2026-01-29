@@ -34,30 +34,53 @@ var AnthropicApiClient = class {
     this.baseUrl = "https://api.anthropic.com/v1/messages";
     this.settings = settings;
   }
-  async sendMessageStream(prompt, context, onChunk) {
-    const response = await this.sendMessage(prompt, context);
+  async sendMessageStream(prompt, context, history, onChunk, fileInfo) {
+    const response = await this.sendMessage(prompt, context, history, fileInfo);
     onChunk(response);
     return response;
   }
-  async sendMessage(prompt, context) {
+  async sendMessage(prompt, context, history, fileInfo) {
     if (!this.settings.apiKey) {
-      throw new Error("API Key \u672A\u8A2D\u5B9A\uFF0C\u8ACB\u5728\u8A2D\u5B9A\u4E2D\u8F38\u5165\u60A8\u7684 Anthropic API Key");
+      throw new Error("API Key not set. Please enter your Anthropic API Key in settings.");
     }
     const systemPrompt = buildSystemPrompt(this.settings);
-    const userContent = context ? `${prompt}
+    let fileInfoText = "";
+    if (fileInfo == null ? void 0 : fileInfo.path) {
+      fileInfoText = `
+
+Current file: ${fileInfo.path}`;
+      if (fileInfo.fullContent) {
+        fileInfoText += `
+
+Full file content:
+\`\`\`
+${fileInfo.fullContent}
+\`\`\``;
+      }
+    }
+    const userContent = context ? `${prompt}${fileInfoText}
 
 ---
 
-${context}` : prompt;
+Selected content:
+${context}` : `${prompt}${fileInfoText}`;
+    const messages = [];
+    if (history && history.length > 0) {
+      for (const msg of history) {
+        messages.push({
+          role: msg.role,
+          content: msg.content
+        });
+      }
+    }
+    messages.push({
+      role: "user",
+      content: userContent
+    });
     const requestBody = {
       model: this.settings.model,
       max_tokens: this.settings.maxTokens,
-      messages: [
-        {
-          role: "user",
-          content: userContent
-        }
-      ],
+      messages,
       system: systemPrompt
     };
     const requestParams = {
@@ -77,7 +100,7 @@ ${context}` : prompt;
         throw new Error(data.error.message);
       }
       if (!data.content || data.content.length === 0) {
-        throw new Error("\u56DE\u61C9\u5167\u5BB9\u70BA\u7A7A");
+        throw new Error("Empty response");
       }
       return data.content[0].text;
     } catch (error) {
@@ -86,7 +109,7 @@ ${context}` : prompt;
   }
   async testConnection() {
     if (!this.settings.apiKey) {
-      throw new Error("API Key \u672A\u8A2D\u5B9A");
+      throw new Error("API Key not set");
     }
     try {
       const requestBody = {
@@ -119,20 +142,20 @@ ${context}` : prompt;
     if (error instanceof Error) {
       const message = error.message.toLowerCase();
       if (message.includes("401") || message.includes("unauthorized")) {
-        return new Error("API Key \u7121\u6548\uFF0C\u8ACB\u5728\u8A2D\u5B9A\u4E2D\u6AA2\u67E5");
+        return new Error("Invalid API Key. Please check settings.");
       }
       if (message.includes("429") || message.includes("rate")) {
-        return new Error("\u8ACB\u6C42\u904E\u65BC\u983B\u7E41\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66");
+        return new Error("Rate limited. Please try again later.");
       }
       if (message.includes("500") || message.includes("502") || message.includes("503")) {
-        return new Error("\u4F3A\u670D\u5668\u932F\u8AA4\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66");
+        return new Error("Server error. Please try again later.");
       }
       if (message.includes("network") || message.includes("fetch") || message.includes("econnrefused")) {
-        return new Error("\u7DB2\u8DEF\u9023\u7DDA\u5931\u6557\uFF0C\u8ACB\u6AA2\u67E5\u7DB2\u8DEF");
+        return new Error("Network connection failed. Please check your internet.");
       }
       return error;
     }
-    return new Error("\u767C\u751F\u672A\u77E5\u932F\u8AA4");
+    return new Error("Unknown error occurred");
   }
 };
 
@@ -143,24 +166,45 @@ var ClaudeCodeClient = class {
   constructor(settings) {
     this.settings = settings;
   }
-  async sendMessage(prompt, context) {
-    return this.sendMessageStream(prompt, context, () => {
+  async sendMessage(prompt, context, history) {
+    return this.sendMessageStream(prompt, context, history || [], () => {
     });
   }
-  async sendMessageStream(prompt, context, onChunk) {
+  async sendMessageStream(prompt, context, history, onChunk, fileInfo) {
     const systemPrompt = buildSystemPrompt(this.settings);
-    const fullPrompt = context ? `${systemPrompt}
+    let historyText = "";
+    if (history.length > 0) {
+      historyText = "\n\n---\nPrevious conversation:\n";
+      for (const msg of history) {
+        const role = msg.role === "user" ? "User" : "Assistant";
+        historyText += `${role}: ${msg.content}
 
----
+`;
+      }
+      historyText += "---\n\n";
+    }
+    let fileInfoText = "";
+    if (fileInfo == null ? void 0 : fileInfo.path) {
+      fileInfoText = `
+
+Current file: ${fileInfo.path}`;
+      if (fileInfo.fullContent) {
+        fileInfoText += `
+
+Full file content:
+\`\`\`
+${fileInfo.fullContent}
+\`\`\``;
+      }
+    }
+    const fullPrompt = context ? `${systemPrompt}${historyText}${fileInfoText}
 
 User request: ${prompt}
 
 ---
 
-Content:
-${context}` : `${systemPrompt}
-
----
+Selected content:
+${context}` : `${systemPrompt}${historyText}${fileInfoText}
 
 ${prompt}`;
     const args = ["-p", fullPrompt, "--output-format", "text"];
@@ -299,6 +343,13 @@ var translations = {
     "settings.prompts.ask": "\u8A62\u554F Prompt",
     "settings.prompts.ask.desc": "\u8A62\u554F\u529F\u80FD\u7684\u63D0\u793A\u8A5E\uFF0C\u4F7F\u7528 {{question}} \u4EE3\u8868\u554F\u984C",
     "settings.prompts.reset": "\u91CD\u8A2D\u70BA\u9810\u8A2D",
+    "settings.conversation": "\u5C0D\u8A71\u8A2D\u5B9A",
+    "settings.maxHistory": "\u6B77\u53F2\u8A0A\u606F\u6578\u91CF",
+    "settings.maxHistory.desc": "\u4FDD\u7559\u7684\u5C0D\u8A71\u6B77\u53F2\u6578\u91CF\uFF08\u6BCF\u8F2A\u5C0D\u8A71\u7B97 2 \u5247\uFF09",
+    "settings.clearHistory": "\u6E05\u9664\u5C0D\u8A71\u6B77\u53F2",
+    "settings.clearHistory.desc": "\u522A\u9664\u6240\u6709\u5132\u5B58\u7684\u5C0D\u8A71\u8A18\u9304",
+    "settings.clearHistory.button": "\u6E05\u9664",
+    "settings.clearHistory.done": "\u5DF2\u6E05\u9664\u5C0D\u8A71\u6B77\u53F2",
     // Chat View
     "chat.title": "Clauwrite",
     "chat.context": "Context",
@@ -311,6 +362,9 @@ var translations = {
     "chat.claude": "Claude",
     "chat.error": "Error",
     "chat.replace": "\u53D6\u4EE3\u9078\u53D6\u5167\u5BB9",
+    "chat.newChat": "\u65B0\u5C0D\u8A71",
+    "chat.clearConfirm": "\u78BA\u5B9A\u8981\u6E05\u9664\u5C0D\u8A71\u6B77\u53F2\u55CE\uFF1F",
+    "chat.fileUpdated": "\u6A94\u6848\u5DF2\u66F4\u65B0",
     // Commands
     "command.openChat": "\u958B\u555F\u5C0D\u8A71\u8996\u7A97",
     "command.summarize": "\u6458\u8981\u7576\u524D\u5167\u5BB9",
@@ -339,7 +393,9 @@ var translations = {
     "error.notAuthenticated": "Claude Code \u5C1A\u672A\u767B\u5165\uFF0C\u8ACB\u5148\u57F7\u884C `claude` \u5B8C\u6210\u767B\u5165",
     "error.cliError": "\u57F7\u884C Claude Code CLI \u6642\u767C\u751F\u932F\u8AA4",
     "error.cliExitCode": "CLI \u8FD4\u56DE\u932F\u8AA4\u78BC: {code}",
-    "error.execError": "\u57F7\u884C\u932F\u8AA4: {message}"
+    "error.execError": "\u57F7\u884C\u932F\u8AA4: {message}",
+    "error.noActiveFile": "\u627E\u4E0D\u5230\u958B\u555F\u7684\u6A94\u6848",
+    "error.editFailed": "\u7DE8\u8F2F\u6A94\u6848\u5931\u6557"
   },
   "en": {
     // Settings
@@ -379,6 +435,13 @@ var translations = {
     "settings.prompts.ask": "Ask Prompt",
     "settings.prompts.ask.desc": "Prompt for ask function, use {{question}} as placeholder",
     "settings.prompts.reset": "Reset to Default",
+    "settings.conversation": "Conversation",
+    "settings.maxHistory": "History Length",
+    "settings.maxHistory.desc": "Number of messages to keep in history (each round = 2 messages)",
+    "settings.clearHistory": "Clear History",
+    "settings.clearHistory.desc": "Delete all saved conversation history",
+    "settings.clearHistory.button": "Clear",
+    "settings.clearHistory.done": "Conversation history cleared",
     // Chat View
     "chat.title": "Clauwrite",
     "chat.context": "Context",
@@ -391,6 +454,9 @@ var translations = {
     "chat.claude": "Claude",
     "chat.error": "Error",
     "chat.replace": "Replace Selection",
+    "chat.newChat": "New Chat",
+    "chat.clearConfirm": "Clear conversation history?",
+    "chat.fileUpdated": "File updated",
     // Commands
     "command.openChat": "Open Chat",
     "command.summarize": "Summarize Content",
@@ -419,7 +485,9 @@ var translations = {
     "error.notAuthenticated": "Claude Code not logged in. Please run `claude` to login first",
     "error.cliError": "Error executing Claude Code CLI",
     "error.cliExitCode": "CLI returned error code: {code}",
-    "error.execError": "Execution error: {message}"
+    "error.execError": "Execution error: {message}",
+    "error.noActiveFile": "No active file found",
+    "error.editFailed": "Failed to edit file"
   }
 };
 var currentLanguage = "zh-TW";
@@ -438,7 +506,15 @@ function t(key, params) {
 
 // src/settings.ts
 var DEFAULT_PROMPTS = {
-  system: "You are an Obsidian note assistant. Help users with their notes.\nUse Markdown formatting. Keep responses concise and well-organized.",
+  system: `You are an Obsidian note assistant. Help users with their notes.
+Use Markdown formatting. Keep responses concise and well-organized.
+
+When the user asks you to edit or modify the current file, respond with the complete new content wrapped in:
+<<<APPLY_EDIT>>>
+(new file content here)
+<<<END_EDIT>>>
+
+Only use this format when the user explicitly asks to modify/edit/update the file. For questions or discussions, respond normally.`,
   summarize: "Please provide a concise summary of the following content:",
   rewrite: "Please rewrite the following content to be clearer and more readable while preserving the meaning:",
   ask: "Answer the question based on the following content.\n\nQuestion: {{question}}"
@@ -452,6 +528,8 @@ var DEFAULT_SETTINGS = {
   uiLanguage: "zh-TW",
   responseLanguage: "zh-TW",
   prompts: { ...DEFAULT_PROMPTS },
+  maxHistoryLength: 20,
+  conversationHistory: [],
   isFirstLoad: true
 };
 var AVAILABLE_MODELS = [
@@ -495,6 +573,9 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     containerEl.createEl("hr");
     containerEl.createEl("h3", { text: t("settings.prompts") });
     this.renderPromptSettings(containerEl);
+    containerEl.createEl("hr");
+    containerEl.createEl("h3", { text: t("settings.conversation") });
+    this.renderConversationSettings(containerEl);
   }
   renderAuthModeSection(containerEl) {
     new import_obsidian2.Setting(containerEl).setName(t("settings.authMode")).setDesc(t("settings.authMode.desc")).addDropdown((dropdown) => {
@@ -653,6 +734,27 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
       });
     });
   }
+  renderConversationSettings(containerEl) {
+    new import_obsidian2.Setting(containerEl).setName(t("settings.maxHistory")).setDesc(t("settings.maxHistory.desc")).addText((text) => {
+      text.setPlaceholder("20").setValue(String(this.plugin.settings.maxHistoryLength)).onChange(async (value) => {
+        const num = parseInt(value, 10);
+        if (!isNaN(num) && num >= 0) {
+          this.plugin.settings.maxHistoryLength = num;
+          await this.plugin.saveSettings();
+        }
+      });
+      text.inputEl.type = "number";
+      text.inputEl.min = "0";
+      text.inputEl.max = "100";
+    });
+    new import_obsidian2.Setting(containerEl).setName(t("settings.clearHistory")).setDesc(t("settings.clearHistory.desc")).addButton((button) => {
+      button.setButtonText(t("settings.clearHistory.button")).onClick(async () => {
+        this.plugin.settings.conversationHistory = [];
+        await this.plugin.saveSettings();
+        new import_obsidian2.Notice(t("settings.clearHistory.done"));
+      });
+    });
+  }
   updateAuthModeVisibility() {
     const isApiKeyMode = this.plugin.settings.authMode === "api-key" || import_obsidian2.Platform.isMobile;
     if (this.apiKeySettingEl) {
@@ -706,20 +808,25 @@ function getContext(app) {
   }
   const editor = view.editor;
   const file = view.file;
+  const fullContent = editor.getValue();
+  const filePath = file == null ? void 0 : file.path;
   const selection = editor.getSelection();
   if (selection) {
     return {
       content: selection,
-      source: "\u9078\u53D6\u5167\u5BB9"
+      source: "\u9078\u53D6\u5167\u5BB9",
+      filePath,
+      fullContent
     };
   }
-  const content = editor.getValue();
-  if (!content) {
+  if (!fullContent) {
     return null;
   }
   return {
-    content,
-    source: (file == null ? void 0 : file.basename) || "\u7576\u524D\u7B46\u8A18"
+    content: fullContent,
+    source: (file == null ? void 0 : file.basename) || "\u7576\u524D\u7B46\u8A18",
+    filePath,
+    fullContent
   };
 }
 function replaceSelection(editor, newContent) {
@@ -759,15 +866,23 @@ var ChatView = class extends import_obsidian4.ItemView {
     this.renderContextIndicator(container);
     this.renderMessages(container);
     this.renderInputArea(container);
+    this.loadConversationHistory();
     this.updateContextIndicator();
   }
   async onClose() {
-    this.messages = [];
+    await this.saveConversationHistory();
   }
   renderHeader(container) {
     const header = container.createDiv({ cls: "clauwrite-header" });
     header.createSpan({ cls: "clauwrite-header-title", text: t("chat.title") });
-    const settingsIcon = header.createSpan({ cls: "clauwrite-header-settings" });
+    const actions = header.createDiv({ cls: "clauwrite-header-actions" });
+    const newChatIcon = actions.createSpan({ cls: "clauwrite-header-icon" });
+    (0, import_obsidian4.setIcon)(newChatIcon, "plus");
+    newChatIcon.setAttribute("aria-label", t("chat.newChat"));
+    newChatIcon.addEventListener("click", () => {
+      this.clearConversation();
+    });
+    const settingsIcon = actions.createSpan({ cls: "clauwrite-header-icon" });
     (0, import_obsidian4.setIcon)(settingsIcon, "settings");
     settingsIcon.addEventListener("click", () => {
       this.app.setting.open();
@@ -798,7 +913,7 @@ var ChatView = class extends import_obsidian4.ItemView {
       this.updateContextIndicator();
     });
     this.inputEl.addEventListener("keydown", (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         this.sendMessage();
       }
@@ -820,6 +935,41 @@ var ChatView = class extends import_obsidian4.ItemView {
       this.contextIndicatorEl.setText(`${t("chat.context")}: ${t("chat.context.none")}`);
     }
   }
+  loadConversationHistory() {
+    const history = this.plugin.settings.conversationHistory;
+    this.messages = history.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+      showReplaceButton: false
+    }));
+    this.renderMessageList();
+  }
+  async saveConversationHistory() {
+    const history = this.messages.filter((msg) => msg.role !== "error").map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+      timestamp: Date.now()
+    }));
+    const maxLength = this.plugin.settings.maxHistoryLength;
+    if (history.length > maxLength) {
+      history.splice(0, history.length - maxLength);
+    }
+    this.plugin.settings.conversationHistory = history;
+    await this.plugin.saveSettings();
+  }
+  async clearConversation() {
+    this.messages = [];
+    this.plugin.settings.conversationHistory = [];
+    await this.plugin.saveSettings();
+    this.renderMessageList();
+  }
+  getConversationHistory() {
+    return this.messages.filter((msg) => msg.role !== "error").map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+      timestamp: Date.now()
+    }));
+  }
   async sendMessage() {
     const message = this.inputEl.value.trim();
     if (!message || this.isLoading) {
@@ -829,19 +979,29 @@ var ChatView = class extends import_obsidian4.ItemView {
     this.inputEl.value = "";
     this.addMessage("user", message);
     const context = getContext(this.app);
-    await this.sendToClaudeStream(message, context == null ? void 0 : context.content);
+    const history = this.getConversationHistory().slice(0, -1);
+    const fileInfo = (context == null ? void 0 : context.filePath) ? {
+      path: context.filePath,
+      fullContent: context.fullContent
+    } : void 0;
+    await this.sendToClaudeStream(message, context == null ? void 0 : context.content, history, false, fileInfo);
   }
-  async sendToClaudeStream(prompt, context, showReplaceButton = false) {
+  async sendToClaudeStream(prompt, context, history, showReplaceButton = false, fileInfo) {
     this.setLoading(true);
     this.startStreamingMessage();
     let fullResponse = "";
     try {
       const client = createClaudeClient(this.plugin.settings);
-      fullResponse = await client.sendMessageStream(prompt, context, (chunk) => {
-        fullResponse += "";
+      fullResponse = await client.sendMessageStream(prompt, context, history || [], (chunk) => {
         this.updateStreamingMessage(chunk);
-      });
-      this.finishStreamingMessage(fullResponse, showReplaceButton);
+      }, fileInfo);
+      const { displayContent, editContent } = this.parseEditBlocks(fullResponse);
+      if (editContent) {
+        await this.applyEditToFile(editContent);
+      }
+      const contentToDisplay = displayContent || fullResponse;
+      this.finishStreamingMessage(contentToDisplay, showReplaceButton);
+      await this.saveConversationHistory();
     } catch (error) {
       this.cancelStreamingMessage();
       const errorMessage = this.extractErrorMessage(error);
@@ -856,7 +1016,12 @@ var ChatView = class extends import_obsidian4.ItemView {
     if (showReplaceButton && (context == null ? void 0 : context.source) === "\u9078\u53D6\u5167\u5BB9") {
       this.lastSelectionContent = context.content;
     }
-    await this.sendToClaudeStream(prompt, context == null ? void 0 : context.content, showReplaceButton);
+    const history = this.getConversationHistory().slice(0, -1);
+    const fileInfo = (context == null ? void 0 : context.filePath) ? {
+      path: context.filePath,
+      fullContent: context.fullContent
+    } : void 0;
+    await this.sendToClaudeStream(prompt, context == null ? void 0 : context.content, history, showReplaceButton, fileInfo);
   }
   startStreamingMessage() {
     this.streamingMessageEl = this.messagesEl.createDiv({
@@ -977,6 +1142,45 @@ var ChatView = class extends import_obsidian4.ItemView {
       }
     }
     return t("error.unknown");
+  }
+  /**
+   * Parse edit blocks from Claude's response
+   */
+  parseEditBlocks(response) {
+    const editPattern = /<<<APPLY_EDIT>>>\n?([\s\S]*?)\n?<<<END_EDIT>>>/g;
+    const matches = [...response.matchAll(editPattern)];
+    if (matches.length === 0) {
+      return { displayContent: response, editContent: null };
+    }
+    const editContent = matches[matches.length - 1][1].trim();
+    const displayContent = response.replace(editPattern, "").trim();
+    return { displayContent, editContent };
+  }
+  /**
+   * Apply edit to the current file
+   */
+  async applyEditToFile(newContent) {
+    let markdownView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+    if (!markdownView) {
+      this.app.workspace.iterateAllLeaves((leaf) => {
+        if (!markdownView && leaf.view instanceof import_obsidian4.MarkdownView) {
+          markdownView = leaf.view;
+        }
+      });
+    }
+    if (!markdownView || !markdownView.file) {
+      new import_obsidian4.Notice(t("error.noActiveFile"));
+      return false;
+    }
+    try {
+      await this.app.vault.modify(markdownView.file, newContent);
+      new import_obsidian4.Notice(t("chat.fileUpdated"));
+      return true;
+    } catch (error) {
+      console.error("Failed to apply edit:", error);
+      new import_obsidian4.Notice(t("error.editFailed"));
+      return false;
+    }
   }
 };
 

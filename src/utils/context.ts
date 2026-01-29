@@ -3,6 +3,8 @@ import { App, Editor, MarkdownView } from 'obsidian';
 export interface ContextResult {
   content: string;
   source: string;
+  filePath?: string;
+  fullContent?: string;
 }
 
 /**
@@ -45,6 +47,8 @@ export function getContext(app: App): ContextResult | null {
 
   const editor = view.editor;
   const file = view.file;
+  const fullContent = editor.getValue();
+  const filePath = file?.path;
 
   // 有選取就用選取
   const selection = editor.getSelection();
@@ -52,18 +56,21 @@ export function getContext(app: App): ContextResult | null {
     return {
       content: selection,
       source: '選取內容',
+      filePath,
+      fullContent,
     };
   }
 
   // 沒選取就用整篇筆記
-  const content = editor.getValue();
-  if (!content) {
+  if (!fullContent) {
     return null;
   }
 
   return {
-    content,
+    content: fullContent,
     source: file?.basename || '當前筆記',
+    filePath,
+    fullContent,
   };
 }
 

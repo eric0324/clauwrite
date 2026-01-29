@@ -22,6 +22,24 @@
   font-size: 14px;
 }
 
+.clauwrite-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.clauwrite-header-icon {
+  cursor: pointer;
+  opacity: 0.7;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.clauwrite-header-icon:hover {
+  opacity: 1;
+  background: var(--background-modifier-hover);
+}
+
 .clauwrite-header-settings {
   cursor: pointer;
   opacity: 0.7;

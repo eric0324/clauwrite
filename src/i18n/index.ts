@@ -39,6 +39,13 @@ const translations = {
     'settings.prompts.ask': '詢問 Prompt',
     'settings.prompts.ask.desc': '詢問功能的提示詞，使用 {{question}} 代表問題',
     'settings.prompts.reset': '重設為預設',
+    'settings.conversation': '對話設定',
+    'settings.maxHistory': '歷史訊息數量',
+    'settings.maxHistory.desc': '保留的對話歷史數量（每輪對話算 2 則）',
+    'settings.clearHistory': '清除對話歷史',
+    'settings.clearHistory.desc': '刪除所有儲存的對話記錄',
+    'settings.clearHistory.button': '清除',
+    'settings.clearHistory.done': '已清除對話歷史',
 
     // Chat View
     'chat.title': 'Clauwrite',
@@ -52,6 +59,9 @@ const translations = {
     'chat.claude': 'Claude',
     'chat.error': 'Error',
     'chat.replace': '取代選取內容',
+    'chat.newChat': '新對話',
+    'chat.clearConfirm': '確定要清除對話歷史嗎？',
+    'chat.fileUpdated': '檔案已更新',
 
     // Commands
     'command.openChat': '開啟對話視窗',
@@ -85,6 +95,8 @@ const translations = {
     'error.cliError': '執行 Claude Code CLI 時發生錯誤',
     'error.cliExitCode': 'CLI 返回錯誤碼: {code}',
     'error.execError': '執行錯誤: {message}',
+    'error.noActiveFile': '找不到開啟的檔案',
+    'error.editFailed': '編輯檔案失敗',
   },
 
   'en': {
@@ -125,6 +137,13 @@ const translations = {
     'settings.prompts.ask': 'Ask Prompt',
     'settings.prompts.ask.desc': 'Prompt for ask function, use {{question}} as placeholder',
     'settings.prompts.reset': 'Reset to Default',
+    'settings.conversation': 'Conversation',
+    'settings.maxHistory': 'History Length',
+    'settings.maxHistory.desc': 'Number of messages to keep in history (each round = 2 messages)',
+    'settings.clearHistory': 'Clear History',
+    'settings.clearHistory.desc': 'Delete all saved conversation history',
+    'settings.clearHistory.button': 'Clear',
+    'settings.clearHistory.done': 'Conversation history cleared',
 
     // Chat View
     'chat.title': 'Clauwrite',
@@ -138,6 +157,9 @@ const translations = {
     'chat.claude': 'Claude',
     'chat.error': 'Error',
     'chat.replace': 'Replace Selection',
+    'chat.newChat': 'New Chat',
+    'chat.clearConfirm': 'Clear conversation history?',
+    'chat.fileUpdated': 'File updated',
 
     // Commands
     'command.openChat': 'Open Chat',
@@ -171,6 +193,8 @@ const translations = {
     'error.cliError': 'Error executing Claude Code CLI',
     'error.cliExitCode': 'CLI returned error code: {code}',
     'error.execError': 'Execution error: {message}',
+    'error.noActiveFile': 'No active file found',
+    'error.editFailed': 'Failed to edit file',
   },
 } as const;
 
