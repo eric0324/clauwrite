@@ -3,8 +3,9 @@
   "name": "Clauwrite",
   "version": "0.1.0",
   "minAppVersion": "1.0.0",
-  "description": "整合 Anthropic Claude API 的筆記助手，提供摘要、改寫、問答功能",
-  "author": "",
-  "authorUrl": "",
-  "isDesktopOnly": false
+  "description": "Claude AI assistant for Obsidian - chat, summarize, rewrite, and agentic note operations",
+  "author": "eric0324",
+  "authorUrl": "https://github.com/eric0324",
+  "isDesktopOnly": false,
+  "fundingUrl": "https://github.com/eric0324/clauwrite"
 }
