@@ -160,17 +160,133 @@ ${context}` : `${prompt}${fileInfoText}`;
 };
 
 // src/api/claude-code-cli.ts
+var import_child_process = require("child_process");
+var CLI_TIMEOUT = 12e4;
 var ClaudeCodeClient = class {
-  constructor(_settings) {
+  constructor(settings) {
+    this.settings = settings;
   }
-  async sendMessage(_prompt, _context, _history) {
-    throw new Error("Claude Code CLI is not available in Obsidian plugins. Please use API Key mode in settings.");
+  async sendMessage(prompt, context, history) {
+    return this.sendMessageStream(prompt, context, history || [], () => {
+    });
   }
-  async sendMessageStream(_prompt, _context, _history, _onChunk) {
-    throw new Error("Claude Code CLI is not available in Obsidian plugins. Please use API Key mode in settings.");
+  async sendMessageStream(prompt, context, history, onChunk, fileInfo) {
+    const systemPrompt = buildSystemPrompt(this.settings);
+    let historyText = "";
+    if (history.length > 0) {
+      historyText = "\n\n---\nPrevious conversation:\n";
+      for (const msg of history) {
+        const role = msg.role === "user" ? "User" : "Assistant";
+        historyText += `${role}: ${msg.content}
+
+`;
+      }
+      historyText += "---\n\n";
+    }
+    let fileInfoText = "";
+    if (fileInfo == null ? void 0 : fileInfo.path) {
+      fileInfoText = `
+
+Current file: ${fileInfo.path}`;
+      if (fileInfo.fullContent) {
+        fileInfoText += `
+
+Full file content:
+\`\`\`
+${fileInfo.fullContent}
+\`\`\``;
+      }
+    }
+    const fullPrompt = context ? `${systemPrompt}${historyText}${fileInfoText}
+
+User request: ${prompt}
+
+---
+
+Selected content:
+${context}` : `${systemPrompt}${historyText}${fileInfoText}
+
+${prompt}`;
+    const args = ["-p", fullPrompt, "--output-format", "text"];
+    if (this.settings.model !== "claude-sonnet-4-20250514") {
+      args.push("--model", this.settings.model);
+    }
+    return this.executeCommandStream(args, onChunk);
   }
   async testConnection() {
-    return false;
+    try {
+      await this.executeCommandStream(["--version"], () => {
+      }, 5e3);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+  executeCommandStream(args, onChunk, timeout = CLI_TIMEOUT) {
+    return new Promise((resolve, reject) => {
+      const cliPath = this.settings.claudeCodePath || "claude";
+      console.debug("Clauwrite: Executing CLI command:", cliPath, args);
+      let stdout = "";
+      let stderr = "";
+      let timedOut = false;
+      const child = (0, import_child_process.spawn)(cliPath, args, {
+        env: { ...process.env },
+        stdio: ["pipe", "pipe", "pipe"]
+      });
+      if (child.stdin) {
+        child.stdin.end();
+      }
+      const timeoutId = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+        reject(new Error("Request timed out"));
+      }, timeout);
+      child.stdout.on("data", (data) => {
+        const chunk = data.toString();
+        stdout += chunk;
+        onChunk(chunk);
+      });
+      child.stderr.on("data", (data) => {
+        stderr += data.toString();
+      });
+      child.on("error", (error) => {
+        clearTimeout(timeoutId);
+        console.error("Clauwrite: spawn error:", error);
+        if (error.code === "ENOENT") {
+          reject(new Error("Cannot find claude command. Check installation or path settings."));
+        } else {
+          reject(new Error(`Execution error: ${error.message}`));
+        }
+      });
+      child.on("close", (code) => {
+        clearTimeout(timeoutId);
+        if (timedOut) {
+          return;
+        }
+        if (code === 0) {
+          resolve(stdout.trim());
+        } else {
+          const output = stderr || stdout;
+          console.error("Claude CLI error output:", { code, stderr, stdout });
+          const errorMessage = this.parseErrorMessage(output);
+          reject(new Error(errorMessage || `CLI returned error code: ${code}`));
+        }
+      });
+    });
+  }
+  parseErrorMessage(output) {
+    const lowerOutput = output.toLowerCase();
+    if (lowerOutput.includes("not authenticated") || lowerOutput.includes("please login") || lowerOutput.includes("authentication")) {
+      return "Claude Code not logged in. Please run `claude` to login first.";
+    }
+    if (lowerOutput.includes("command not found") || lowerOutput.includes("not recognized")) {
+      return "Cannot find claude command. Check installation or path settings.";
+    }
+    if (output.trim()) {
+      const firstLine = output.split("\n")[0].trim();
+      return firstLine.length > 200 ? firstLine.substring(0, 200) + "..." : firstLine;
+    }
+    return "Error executing Claude Code CLI";
   }
 };
 
