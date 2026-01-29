@@ -4,6 +4,7 @@ import { ClaudeCodeClient } from './claude-code-cli';
 
 export interface ClaudeClient {
   sendMessage(prompt: string, context?: string): Promise<string>;
+  sendMessageStream(prompt: string, context: string | undefined, onChunk: (chunk: string) => void): Promise<string>;
   testConnection(): Promise<boolean>;
 }
 

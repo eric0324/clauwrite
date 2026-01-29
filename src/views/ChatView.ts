@@ -25,6 +25,8 @@ export class ChatView extends ItemView {
   private contextIndicatorEl: HTMLElement;
   private loadingEl: HTMLElement;
   private loadingTextEl: HTMLElement;
+  private streamingMessageEl: HTMLElement | null = null;
+  private streamingContentEl: HTMLElement | null = null;
   private messages: ChatMessage[] = [];
   private isLoading = false;
   private lastSelectionContent: string | null = null;
@@ -146,19 +148,26 @@ export class ChatView extends ItemView {
     this.addMessage('user', message);
 
     const context = getContext(this.app);
-    console.log('Clauwrite: sending with context:', context?.source || 'none');
 
-    await this.sendToClaudeWithContext(message, context?.content);
+    await this.sendToClaudeStream(message, context?.content);
   }
 
-  async sendToClaudeWithContext(prompt: string, context?: string): Promise<void> {
+  async sendToClaudeStream(prompt: string, context?: string, showReplaceButton = false): Promise<void> {
     this.setLoading(true);
+    this.startStreamingMessage();
+
+    let fullResponse = '';
 
     try {
       const client = createClaudeClient(this.plugin.settings);
-      const response = await client.sendMessage(prompt, context);
-      this.addMessage('assistant', response);
+      fullResponse = await client.sendMessageStream(prompt, context, (chunk) => {
+        fullResponse += '';
+        this.updateStreamingMessage(chunk);
+      });
+
+      this.finishStreamingMessage(fullResponse, showReplaceButton);
     } catch (error) {
+      this.cancelStreamingMessage();
       const errorMessage = this.extractErrorMessage(error);
       this.addMessage('error', errorMessage);
     } finally {
@@ -171,22 +180,81 @@ export class ChatView extends ItemView {
 
     const context = getContext(this.app);
 
-    // Store selection for replace functionality
     if (showReplaceButton && context?.source === '選取內容') {
       this.lastSelectionContent = context.content;
     }
 
-    this.setLoading(true);
+    await this.sendToClaudeStream(prompt, context?.content, showReplaceButton);
+  }
 
-    try {
-      const client = createClaudeClient(this.plugin.settings);
-      const response = await client.sendMessage(prompt, context?.content);
-      this.addMessage('assistant', response, showReplaceButton);
-    } catch (error) {
-      const errorMessage = this.extractErrorMessage(error);
-      this.addMessage('error', errorMessage);
-    } finally {
-      this.setLoading(false);
+  private startStreamingMessage(): void {
+    // Create streaming message element
+    this.streamingMessageEl = this.messagesEl.createDiv({
+      cls: 'clauwrite-message clauwrite-message-assistant clauwrite-message-streaming',
+    });
+
+    this.streamingMessageEl.createDiv({ cls: 'clauwrite-message-role', text: t('chat.claude') });
+    this.streamingContentEl = this.streamingMessageEl.createDiv({ cls: 'clauwrite-message-content' });
+
+    // Insert before loading indicator
+    this.messagesEl.insertBefore(this.streamingMessageEl, this.loadingEl);
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  private updateStreamingMessage(chunk: string): void {
+    if (!this.streamingContentEl) return;
+
+    // Append text directly for streaming effect
+    const currentText = this.streamingContentEl.getText() + chunk;
+    this.streamingContentEl.setText(currentText);
+
+    // Scroll to bottom
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  private finishStreamingMessage(finalContent: string, showReplaceButton: boolean): void {
+    if (!this.streamingMessageEl || !this.streamingContentEl) return;
+
+    // Remove streaming class
+    this.streamingMessageEl.removeClass('clauwrite-message-streaming');
+
+    // Clear and render as markdown
+    this.streamingContentEl.empty();
+    MarkdownRenderer.renderMarkdown(
+      finalContent,
+      this.streamingContentEl,
+      '',
+      this
+    );
+
+    // Add replace button if needed
+    if (showReplaceButton && this.lastSelectionContent) {
+      const replaceBtn = this.streamingMessageEl.createEl('button', {
+        cls: 'clauwrite-replace-button',
+        text: t('chat.replace'),
+      });
+      const content = finalContent;
+      replaceBtn.addEventListener('click', () => {
+        const editor = getActiveEditor(this.app);
+        if (editor) {
+          replaceSelection(editor, content);
+        }
+      });
+    }
+
+    // Add to messages array
+    this.messages.push({ role: 'assistant', content: finalContent, showReplaceButton });
+
+    // Clean up
+    this.streamingMessageEl = null;
+    this.streamingContentEl = null;
+  }
+
+  private cancelStreamingMessage(): void {
+    if (this.streamingMessageEl) {
+      this.streamingMessageEl.remove();
+      this.streamingMessageEl = null;
+      this.streamingContentEl = null;
     }
   }
 
@@ -196,10 +264,10 @@ export class ChatView extends ItemView {
   }
 
   private renderMessageList(): void {
-    // Clear all messages except loading indicator
+    // Clear all messages except loading indicator and streaming message
     const children = Array.from(this.messagesEl.children);
     children.forEach((child) => {
-      if (!child.hasClass('clauwrite-loading')) {
+      if (!child.hasClass('clauwrite-loading') && !child.hasClass('clauwrite-message-streaming')) {
         child.remove();
       }
     });

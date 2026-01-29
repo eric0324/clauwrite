@@ -34,6 +34,18 @@ export class AnthropicApiClient implements ClaudeClient {
     this.settings = settings;
   }
 
+  async sendMessageStream(
+    prompt: string,
+    context: string | undefined,
+    onChunk: (chunk: string) => void
+  ): Promise<string> {
+    // API mode doesn't support streaming with Obsidian's requestUrl
+    // Fall back to regular request and emit full response at once
+    const response = await this.sendMessage(prompt, context);
+    onChunk(response);
+    return response;
+  }
+
   async sendMessage(prompt: string, context?: string): Promise<string> {
     if (!this.settings.apiKey) {
       throw new Error('API Key 未設定，請在設定中輸入您的 Anthropic API Key');

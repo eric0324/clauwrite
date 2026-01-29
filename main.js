@@ -34,6 +34,11 @@ var AnthropicApiClient = class {
     this.baseUrl = "https://api.anthropic.com/v1/messages";
     this.settings = settings;
   }
+  async sendMessageStream(prompt, context, onChunk) {
+    const response = await this.sendMessage(prompt, context);
+    onChunk(response);
+    return response;
+  }
   async sendMessage(prompt, context) {
     if (!this.settings.apiKey) {
       throw new Error("API Key \u672A\u8A2D\u5B9A\uFF0C\u8ACB\u5728\u8A2D\u5B9A\u4E2D\u8F38\u5165\u60A8\u7684 Anthropic API Key");
@@ -139,16 +144,20 @@ var ClaudeCodeClient = class {
     this.settings = settings;
   }
   async sendMessage(prompt, context) {
+    return this.sendMessageStream(prompt, context, () => {
+    });
+  }
+  async sendMessageStream(prompt, context, onChunk) {
     const systemPrompt = buildSystemPrompt(this.settings);
     const fullPrompt = context ? `${systemPrompt}
 
 ---
 
-\u4F7F\u7528\u8005\u554F\u984C\uFF1A${prompt}
+User request: ${prompt}
 
 ---
 
-\u76F8\u95DC\u5167\u5BB9\uFF1A
+Content:
 ${context}` : `${systemPrompt}
 
 ---
@@ -158,17 +167,18 @@ ${prompt}`;
     if (this.settings.model !== "claude-sonnet-4-20250514") {
       args.push("--model", this.settings.model);
     }
-    return this.executeCommand(args);
+    return this.executeCommandStream(args, onChunk);
   }
   async testConnection() {
     try {
-      await this.executeCommand(["--version"], 5e3);
+      await this.executeCommandStream(["--version"], () => {
+      }, 5e3);
       return true;
     } catch (e) {
       return false;
     }
   }
-  executeCommand(args, timeout = CLI_TIMEOUT) {
+  executeCommandStream(args, onChunk, timeout = CLI_TIMEOUT) {
     return new Promise((resolve, reject) => {
       const cliPath = this.settings.claudeCodePath || "claude";
       console.log("Clauwrite: Executing CLI command:", cliPath, args);
@@ -185,28 +195,27 @@ ${prompt}`;
       const timeoutId = setTimeout(() => {
         timedOut = true;
         child.kill("SIGTERM");
-        reject(new Error("\u8ACB\u6C42\u903E\u6642\uFF0C\u8ACB\u7A0D\u5F8C\u518D\u8A66"));
+        reject(new Error("Request timed out"));
       }, timeout);
       child.stdout.on("data", (data) => {
-        stdout += data.toString();
-        console.log("Clauwrite: stdout chunk received, length:", data.length);
+        const chunk = data.toString();
+        stdout += chunk;
+        onChunk(chunk);
       });
       child.stderr.on("data", (data) => {
         stderr += data.toString();
-        console.log("Clauwrite: stderr chunk:", data.toString());
       });
       child.on("error", (error) => {
         clearTimeout(timeoutId);
         console.error("Clauwrite: spawn error:", error);
         if (error.code === "ENOENT") {
-          reject(new Error("\u627E\u4E0D\u5230 claude \u547D\u4EE4\uFF0C\u8ACB\u78BA\u8A8D\u5DF2\u5B89\u88DD Claude Code \u6216\u6AA2\u67E5\u8DEF\u5F91\u8A2D\u5B9A"));
+          reject(new Error("Cannot find claude command. Check installation or path settings."));
         } else {
-          reject(new Error(`\u57F7\u884C\u932F\u8AA4: ${error.message}`));
+          reject(new Error(`Execution error: ${error.message}`));
         }
       });
       child.on("close", (code) => {
         clearTimeout(timeoutId);
-        console.log("Clauwrite: CLI process closed with code:", code);
         if (timedOut) {
           return;
         }
@@ -216,7 +225,7 @@ ${prompt}`;
           const output = stderr || stdout;
           console.error("Claude CLI error output:", { code, stderr, stdout });
           const errorMessage = this.parseErrorMessage(output);
-          reject(new Error(errorMessage || `CLI \u8FD4\u56DE\u932F\u8AA4\u78BC: ${code}`));
+          reject(new Error(errorMessage || `CLI returned error code: ${code}`));
         }
       });
     });
@@ -224,16 +233,16 @@ ${prompt}`;
   parseErrorMessage(output) {
     const lowerOutput = output.toLowerCase();
     if (lowerOutput.includes("not authenticated") || lowerOutput.includes("please login") || lowerOutput.includes("authentication")) {
-      return "Claude Code \u5C1A\u672A\u767B\u5165\uFF0C\u8ACB\u5148\u57F7\u884C `claude` \u5B8C\u6210\u767B\u5165";
+      return "Claude Code not logged in. Please run `claude` to login first.";
     }
     if (lowerOutput.includes("command not found") || lowerOutput.includes("not recognized")) {
-      return "\u627E\u4E0D\u5230 claude \u547D\u4EE4\uFF0C\u8ACB\u78BA\u8A8D\u5DF2\u5B89\u88DD Claude Code \u6216\u6AA2\u67E5\u8DEF\u5F91\u8A2D\u5B9A";
+      return "Cannot find claude command. Check installation or path settings.";
     }
     if (output.trim()) {
       const firstLine = output.split("\n")[0].trim();
       return firstLine.length > 200 ? firstLine.substring(0, 200) + "..." : firstLine;
     }
-    return "\u57F7\u884C Claude Code CLI \u6642\u767C\u751F\u932F\u8AA4";
+    return "Error executing Claude Code CLI";
   }
 };
 
@@ -726,6 +735,8 @@ var CHAT_VIEW_TYPE = "clauwrite-chat-view";
 var ChatView = class extends import_obsidian4.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
+    this.streamingMessageEl = null;
+    this.streamingContentEl = null;
     this.messages = [];
     this.isLoading = false;
     this.lastSelectionContent = null;
@@ -818,16 +829,21 @@ var ChatView = class extends import_obsidian4.ItemView {
     this.inputEl.value = "";
     this.addMessage("user", message);
     const context = getContext(this.app);
-    console.log("Clauwrite: sending with context:", (context == null ? void 0 : context.source) || "none");
-    await this.sendToClaudeWithContext(message, context == null ? void 0 : context.content);
+    await this.sendToClaudeStream(message, context == null ? void 0 : context.content);
   }
-  async sendToClaudeWithContext(prompt, context) {
+  async sendToClaudeStream(prompt, context, showReplaceButton = false) {
     this.setLoading(true);
+    this.startStreamingMessage();
+    let fullResponse = "";
     try {
       const client = createClaudeClient(this.plugin.settings);
-      const response = await client.sendMessage(prompt, context);
-      this.addMessage("assistant", response);
+      fullResponse = await client.sendMessageStream(prompt, context, (chunk) => {
+        fullResponse += "";
+        this.updateStreamingMessage(chunk);
+      });
+      this.finishStreamingMessage(fullResponse, showReplaceButton);
     } catch (error) {
+      this.cancelStreamingMessage();
       const errorMessage = this.extractErrorMessage(error);
       this.addMessage("error", errorMessage);
     } finally {
@@ -840,16 +856,57 @@ var ChatView = class extends import_obsidian4.ItemView {
     if (showReplaceButton && (context == null ? void 0 : context.source) === "\u9078\u53D6\u5167\u5BB9") {
       this.lastSelectionContent = context.content;
     }
-    this.setLoading(true);
-    try {
-      const client = createClaudeClient(this.plugin.settings);
-      const response = await client.sendMessage(prompt, context == null ? void 0 : context.content);
-      this.addMessage("assistant", response, showReplaceButton);
-    } catch (error) {
-      const errorMessage = this.extractErrorMessage(error);
-      this.addMessage("error", errorMessage);
-    } finally {
-      this.setLoading(false);
+    await this.sendToClaudeStream(prompt, context == null ? void 0 : context.content, showReplaceButton);
+  }
+  startStreamingMessage() {
+    this.streamingMessageEl = this.messagesEl.createDiv({
+      cls: "clauwrite-message clauwrite-message-assistant clauwrite-message-streaming"
+    });
+    this.streamingMessageEl.createDiv({ cls: "clauwrite-message-role", text: t("chat.claude") });
+    this.streamingContentEl = this.streamingMessageEl.createDiv({ cls: "clauwrite-message-content" });
+    this.messagesEl.insertBefore(this.streamingMessageEl, this.loadingEl);
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+  updateStreamingMessage(chunk) {
+    if (!this.streamingContentEl)
+      return;
+    const currentText = this.streamingContentEl.getText() + chunk;
+    this.streamingContentEl.setText(currentText);
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+  finishStreamingMessage(finalContent, showReplaceButton) {
+    if (!this.streamingMessageEl || !this.streamingContentEl)
+      return;
+    this.streamingMessageEl.removeClass("clauwrite-message-streaming");
+    this.streamingContentEl.empty();
+    import_obsidian4.MarkdownRenderer.renderMarkdown(
+      finalContent,
+      this.streamingContentEl,
+      "",
+      this
+    );
+    if (showReplaceButton && this.lastSelectionContent) {
+      const replaceBtn = this.streamingMessageEl.createEl("button", {
+        cls: "clauwrite-replace-button",
+        text: t("chat.replace")
+      });
+      const content = finalContent;
+      replaceBtn.addEventListener("click", () => {
+        const editor = getActiveEditor(this.app);
+        if (editor) {
+          replaceSelection(editor, content);
+        }
+      });
+    }
+    this.messages.push({ role: "assistant", content: finalContent, showReplaceButton });
+    this.streamingMessageEl = null;
+    this.streamingContentEl = null;
+  }
+  cancelStreamingMessage() {
+    if (this.streamingMessageEl) {
+      this.streamingMessageEl.remove();
+      this.streamingMessageEl = null;
+      this.streamingContentEl = null;
     }
   }
   addMessage(role, content, showReplaceButton = false) {
@@ -859,7 +916,7 @@ var ChatView = class extends import_obsidian4.ItemView {
   renderMessageList() {
     const children = Array.from(this.messagesEl.children);
     children.forEach((child) => {
-      if (!child.hasClass("clauwrite-loading")) {
+      if (!child.hasClass("clauwrite-loading") && !child.hasClass("clauwrite-message-streaming")) {
         child.remove();
       }
     });
