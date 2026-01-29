@@ -1,0 +1,245 @@
+/* Clauwrite - Obsidian Claude Assistant Plugin Styles */
+
+/* Chat View Container */
+.clauwrite-chat-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0;
+}
+
+/* Header */
+.clauwrite-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.clauwrite-header-title {
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.clauwrite-header-settings {
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.clauwrite-header-settings:hover {
+  opacity: 1;
+}
+
+/* Context Indicator */
+.clauwrite-context {
+  padding: 8px 12px;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: 12px;
+}
+
+.clauwrite-context-label {
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.clauwrite-context-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.clauwrite-context-controls select {
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.clauwrite-context-clear {
+  font-size: 11px;
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.clauwrite-context-clear:hover {
+  color: var(--text-normal);
+}
+
+/* Messages Area */
+.clauwrite-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* Message Bubble */
+.clauwrite-message {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  max-width: 95%;
+}
+
+.clauwrite-message-user {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  margin-left: auto;
+}
+
+.clauwrite-message-assistant {
+  background: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+.clauwrite-message-role {
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 4px;
+  opacity: 0.8;
+}
+
+.clauwrite-message-content {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.clauwrite-message-content p:last-child {
+  margin-bottom: 0;
+}
+
+/* Error Message */
+.clauwrite-message-error {
+  background: var(--background-modifier-error);
+  color: var(--text-error);
+  border: 1px solid var(--text-error);
+}
+
+/* Loading Indicator */
+.clauwrite-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.clauwrite-loading-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.clauwrite-loading-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--text-muted);
+  border-radius: 50%;
+  animation: clauwrite-bounce 1.4s infinite ease-in-out both;
+}
+
+.clauwrite-loading-dot:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.clauwrite-loading-dot:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes clauwrite-bounce {
+  0%, 80%, 100% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(1);
+  }
+}
+
+/* Input Area */
+.clauwrite-input-area {
+  display: flex;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+}
+
+.clauwrite-input {
+  flex: 1;
+  min-height: 36px;
+  max-height: 120px;
+  padding: 8px 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  resize: none;
+  font-family: inherit;
+}
+
+.clauwrite-input:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.clauwrite-send-button {
+  padding: 8px 16px;
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clauwrite-send-button:hover {
+  opacity: 0.9;
+}
+
+.clauwrite-send-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Replace Selection Button */
+.clauwrite-replace-button {
+  margin-top: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  background: var(--interactive-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-normal);
+}
+
+.clauwrite-replace-button:hover {
+  background: var(--interactive-hover);
+}
+
+/* Ask Modal */
+.clauwrite-ask-modal {
+  padding: 16px;
+}
+
+.clauwrite-ask-modal textarea {
+  width: 100%;
+  min-height: 100px;
+  margin-bottom: 12px;
+  padding: 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 14px;
+  resize: vertical;
+}
+
+.clauwrite-ask-modal-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
