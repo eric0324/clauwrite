@@ -1,0 +1,279 @@
+import {
+  ItemView,
+  WorkspaceLeaf,
+  MarkdownRenderer,
+  setIcon,
+} from 'obsidian';
+import type ClauwritePlugin from '../main';
+import type { ContextMode } from '../settings';
+import { getContext, replaceSelection, getActiveEditor } from '../utils/context';
+import { createClaudeClient } from '../api/claude';
+
+export const CHAT_VIEW_TYPE = 'clauwrite-chat-view';
+
+interface ChatMessage {
+  role: 'user' | 'assistant' | 'error';
+  content: string;
+  showReplaceButton?: boolean;
+}
+
+export class ChatView extends ItemView {
+  plugin: ClauwritePlugin;
+  private messagesEl: HTMLElement;
+  private inputEl: HTMLTextAreaElement;
+  private sendButton: HTMLButtonElement;
+  private contextIndicatorEl: HTMLElement;
+  private contextModeSelect: HTMLSelectElement;
+  private loadingEl: HTMLElement;
+  private messages: ChatMessage[] = [];
+  private isLoading = false;
+  private currentContextMode: ContextMode;
+  private lastSelectionContent: string | null = null;
+
+  constructor(leaf: WorkspaceLeaf, plugin: ClauwritePlugin) {
+    super(leaf);
+    this.plugin = plugin;
+    this.currentContextMode = plugin.settings.contextMode;
+  }
+
+  getViewType(): string {
+    return CHAT_VIEW_TYPE;
+  }
+
+  getDisplayText(): string {
+    return 'Clauwrite';
+  }
+
+  getIcon(): string {
+    return 'message-circle';
+  }
+
+  async onOpen(): Promise<void> {
+    const container = this.containerEl.children[1];
+    container.empty();
+    container.addClass('clauwrite-chat-container');
+
+    this.renderHeader(container);
+    this.renderContextIndicator(container);
+    this.renderMessages(container);
+    this.renderInputArea(container);
+
+    this.updateContextIndicator();
+  }
+
+  async onClose(): Promise<void> {
+    this.messages = [];
+  }
+
+  private renderHeader(container: Element): void {
+    const header = container.createDiv({ cls: 'clauwrite-header' });
+
+    header.createSpan({ cls: 'clauwrite-header-title', text: 'Clauwrite' });
+
+    const settingsIcon = header.createSpan({ cls: 'clauwrite-header-settings' });
+    setIcon(settingsIcon, 'settings');
+    settingsIcon.addEventListener('click', () => {
+      // Open settings tab
+      (this.app as any).setting.open();
+      (this.app as any).setting.openTabById('clauwrite');
+    });
+  }
+
+  private renderContextIndicator(container: Element): void {
+    const contextDiv = container.createDiv({ cls: 'clauwrite-context' });
+
+    this.contextIndicatorEl = contextDiv.createDiv({ cls: 'clauwrite-context-label' });
+
+    const controls = contextDiv.createDiv({ cls: 'clauwrite-context-controls' });
+
+    this.contextModeSelect = controls.createEl('select');
+    this.contextModeSelect.createEl('option', { value: 'note', text: '整篇筆記' });
+    this.contextModeSelect.createEl('option', { value: 'selection', text: '選取內容' });
+    this.contextModeSelect.value = this.currentContextMode;
+    this.contextModeSelect.addEventListener('change', () => {
+      this.currentContextMode = this.contextModeSelect.value as ContextMode;
+      this.updateContextIndicator();
+    });
+
+    const clearBtn = controls.createSpan({ cls: 'clauwrite-context-clear', text: '清除' });
+    clearBtn.addEventListener('click', () => {
+      this.lastSelectionContent = null;
+      this.updateContextIndicator();
+    });
+  }
+
+  private renderMessages(container: Element): void {
+    this.messagesEl = container.createDiv({ cls: 'clauwrite-messages' });
+
+    // Loading indicator
+    this.loadingEl = this.messagesEl.createDiv({ cls: 'clauwrite-loading' });
+    this.loadingEl.style.display = 'none';
+
+    const dotsContainer = this.loadingEl.createDiv({ cls: 'clauwrite-loading-dots' });
+    dotsContainer.createSpan({ cls: 'clauwrite-loading-dot' });
+    dotsContainer.createSpan({ cls: 'clauwrite-loading-dot' });
+    dotsContainer.createSpan({ cls: 'clauwrite-loading-dot' });
+    this.loadingEl.createSpan({ text: '思考中...' });
+  }
+
+  private renderInputArea(container: Element): void {
+    const inputArea = container.createDiv({ cls: 'clauwrite-input-area' });
+
+    this.inputEl = inputArea.createEl('textarea', {
+      cls: 'clauwrite-input',
+      attr: { placeholder: '輸入訊息...' },
+    });
+
+    this.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        this.sendMessage();
+      }
+    });
+
+    this.sendButton = inputArea.createEl('button', {
+      cls: 'clauwrite-send-button',
+      text: '送出',
+    });
+
+    this.sendButton.addEventListener('click', () => {
+      this.sendMessage();
+    });
+  }
+
+  private updateContextIndicator(): void {
+    const context = getContext(this.app, this.currentContextMode);
+    if (context) {
+      this.contextIndicatorEl.setText(`Context: ${context.source}`);
+    } else {
+      this.contextIndicatorEl.setText('Context: 無');
+    }
+  }
+
+  async sendMessage(): Promise<void> {
+    const message = this.inputEl.value.trim();
+    if (!message || this.isLoading) {
+      return;
+    }
+
+    this.inputEl.value = '';
+    this.addMessage('user', message);
+
+    const context = getContext(this.app, this.currentContextMode);
+
+    await this.sendToClaudeWithContext(message, context?.content);
+  }
+
+  async sendToClaudeWithContext(prompt: string, context?: string): Promise<void> {
+    this.setLoading(true);
+
+    try {
+      const client = createClaudeClient(this.plugin.settings);
+      const response = await client.sendMessage(prompt, context);
+      this.addMessage('assistant', response);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '發生未知錯誤';
+      this.addMessage('error', errorMessage);
+    } finally {
+      this.setLoading(false);
+    }
+  }
+
+  async sendPromptWithContext(prompt: string, showReplaceButton = false): Promise<void> {
+    this.addMessage('user', prompt);
+
+    const context = getContext(this.app, this.currentContextMode);
+
+    // Store selection for replace functionality
+    if (showReplaceButton && this.currentContextMode === 'selection') {
+      this.lastSelectionContent = context?.content || null;
+    }
+
+    this.setLoading(true);
+
+    try {
+      const client = createClaudeClient(this.plugin.settings);
+      const response = await client.sendMessage(prompt, context?.content);
+      this.addMessage('assistant', response, showReplaceButton);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : '發生未知錯誤';
+      this.addMessage('error', errorMessage);
+    } finally {
+      this.setLoading(false);
+    }
+  }
+
+  private addMessage(role: ChatMessage['role'], content: string, showReplaceButton = false): void {
+    this.messages.push({ role, content, showReplaceButton });
+    this.renderMessageList();
+  }
+
+  private renderMessageList(): void {
+    // Clear all messages except loading indicator
+    const children = Array.from(this.messagesEl.children);
+    children.forEach((child) => {
+      if (!child.hasClass('clauwrite-loading')) {
+        child.remove();
+      }
+    });
+
+    // Render all messages
+    this.messages.forEach((msg) => {
+      const messageEl = this.messagesEl.createDiv({
+        cls: `clauwrite-message clauwrite-message-${msg.role}`,
+      });
+
+      const roleLabel = msg.role === 'user' ? 'You' : msg.role === 'assistant' ? 'Claude' : 'Error';
+      messageEl.createDiv({ cls: 'clauwrite-message-role', text: roleLabel });
+
+      const contentEl = messageEl.createDiv({ cls: 'clauwrite-message-content' });
+
+      if (msg.role === 'error') {
+        contentEl.setText(msg.content);
+      } else {
+        MarkdownRenderer.renderMarkdown(
+          msg.content,
+          contentEl,
+          '',
+          this
+        );
+      }
+
+      // Add replace button for assistant messages if needed
+      if (msg.role === 'assistant' && msg.showReplaceButton && this.lastSelectionContent) {
+        const replaceBtn = messageEl.createEl('button', {
+          cls: 'clauwrite-replace-button',
+          text: '取代選取內容',
+        });
+        replaceBtn.addEventListener('click', () => {
+          const editor = getActiveEditor(this.app);
+          if (editor) {
+            replaceSelection(editor, msg.content);
+          }
+        });
+      }
+
+      // Insert before loading indicator
+      this.messagesEl.insertBefore(messageEl, this.loadingEl);
+    });
+
+    // Scroll to bottom
+    this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+  }
+
+  private setLoading(loading: boolean): void {
+    this.isLoading = loading;
+    this.loadingEl.style.display = loading ? 'flex' : 'none';
+    this.sendButton.disabled = loading;
+
+    if (loading) {
+      this.messagesEl.scrollTop = this.messagesEl.scrollHeight;
+    }
+  }
+
+  setContextMode(mode: ContextMode): void {
+    this.currentContextMode = mode;
+    this.contextModeSelect.value = mode;
+    this.updateContextIndicator();
+  }
+}
