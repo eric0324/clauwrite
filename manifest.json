@@ -3,7 +3,7 @@
   "name": "Clauwrite",
   "version": "0.1.0",
   "minAppVersion": "1.0.0",
-  "description": "Claude AI assistant for Obsidian - chat, summarize, rewrite, and agentic note operations",
+  "description": "Claude AI assistant - chat, summarize, rewrite, and agentic note operations.",
   "author": "eric0324",
   "authorUrl": "https://github.com/eric0324",
   "isDesktopOnly": false,
