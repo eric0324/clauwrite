@@ -25,7 +25,7 @@ export default class ClauwritePlugin extends Plugin {
 
     // Register ribbon icon
     this.addRibbonIcon('message-circle', 'Clauwrite', () => {
-      this.activateChatView();
+      void this.activateChatView();
     });
 
     // Register commands
@@ -41,8 +41,8 @@ export default class ClauwritePlugin extends Plugin {
   }
 
   onunload(): void {
-    // Detach all Chat View leaves
-    this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
+    // Clean up resources if needed
+    // Note: Do not detach leaves in onunload as it resets leaf position
   }
 
   async loadSettings(): Promise<void> {
@@ -59,7 +59,7 @@ export default class ClauwritePlugin extends Plugin {
       id: 'open-chat',
       name: t('command.openChat'),
       callback: () => {
-        this.activateChatView();
+        void this.activateChatView();
       },
     });
 

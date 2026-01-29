@@ -10,7 +10,7 @@ import type ClauwritePlugin from '../main';
 import type { ConversationMessage } from '../settings';
 import { getContext, replaceSelection, getActiveEditor } from '../utils/context';
 import { createClaudeClient, FileInfo } from '../api/claude';
-import { parseToolCalls, AgentToolExecutor, buildAgenticSystemPrompt, ToolCall, ToolResult } from '../utils/agent-tools';
+import { parseToolCalls, AgentToolExecutor, ToolCall, ToolResult } from '../utils/agent-tools';
 import { t } from '../i18n';
 
 export const CHAT_VIEW_TYPE = 'clauwrite-chat-view';
@@ -56,7 +56,7 @@ export class ChatView extends ItemView {
     return 'message-circle';
   }
 
-  async onOpen(): Promise<void> {
+  onOpen(): void {
     const container = this.containerEl.children[1];
     container.empty();
     container.addClass('clauwrite-chat-container');
@@ -88,15 +88,17 @@ export class ChatView extends ItemView {
     setIcon(newChatIcon, 'plus');
     newChatIcon.setAttribute('aria-label', t('chat.newChat'));
     newChatIcon.addEventListener('click', () => {
-      this.clearConversation();
+      void this.clearConversation();
     });
 
     // Settings button
     const settingsIcon = actions.createSpan({ cls: 'clauwrite-header-icon' });
     setIcon(settingsIcon, 'settings');
     settingsIcon.addEventListener('click', () => {
-      (this.app as any).setting.open();
-      (this.app as any).setting.openTabById('clauwrite');
+      // @ts-expect-error - Obsidian internal API for opening settings
+      this.app.setting.open();
+      // @ts-expect-error - Obsidian internal API for opening specific settings tab
+      this.app.setting.openTabById('clauwrite');
     });
   }
 
@@ -109,8 +111,7 @@ export class ChatView extends ItemView {
     this.messagesEl = container.createDiv({ cls: 'clauwrite-messages' });
 
     // Loading indicator
-    this.loadingEl = this.messagesEl.createDiv({ cls: 'clauwrite-loading' });
-    this.loadingEl.style.display = 'none';
+    this.loadingEl = this.messagesEl.createDiv({ cls: 'clauwrite-loading clauwrite-loading-hidden' });
 
     const dotsContainer = this.loadingEl.createDiv({ cls: 'clauwrite-loading-dots' });
     dotsContainer.createSpan({ cls: 'clauwrite-loading-dot' });
@@ -140,7 +141,7 @@ export class ChatView extends ItemView {
           // Clear immediately and force UI update
           this.inputEl.value = '';
           this.inputEl.dispatchEvent(new Event('input'));
-          this.handleSendMessage(message);
+          void this.handleSendMessage(message);
         }
       }
     });
@@ -151,7 +152,7 @@ export class ChatView extends ItemView {
     });
 
     this.sendButton.addEventListener('click', () => {
-      this.sendMessage();
+      void this.sendMessage();
     });
   }
 
@@ -460,7 +461,8 @@ export class ChatView extends ItemView {
     this.streamingMessageEl.removeClass('clauwrite-message-streaming');
 
     this.streamingContentEl.empty();
-    MarkdownRenderer.renderMarkdown(
+    void MarkdownRenderer.render(
+      this.app,
       finalContent,
       this.streamingContentEl,
       '',
@@ -525,7 +527,8 @@ export class ChatView extends ItemView {
       if (msg.role === 'error') {
         contentEl.setText(msg.content);
       } else {
-        MarkdownRenderer.renderMarkdown(
+        void MarkdownRenderer.render(
+          this.app,
           msg.content,
           contentEl,
           '',
@@ -554,7 +557,7 @@ export class ChatView extends ItemView {
 
   private setLoading(loading: boolean): void {
     this.isLoading = loading;
-    this.loadingEl.style.display = loading ? 'flex' : 'none';
+    this.loadingEl.toggleClass('clauwrite-loading-hidden', !loading);
     this.sendButton.disabled = loading;
 
     if (loading) {

@@ -28,7 +28,7 @@ class AskModal extends Modal {
     textArea.addEventListener('keydown', (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
         e.preventDefault();
-        this.submitQuestion();
+        void this.submitQuestion();
       }
     });
 
@@ -44,7 +44,7 @@ class AskModal extends Modal {
       cls: 'mod-cta',
     });
     submitBtn.addEventListener('click', () => {
-      this.submitQuestion();
+      void this.submitQuestion();
     });
 
     setTimeout(() => textArea.focus(), 10);
@@ -79,7 +79,7 @@ export function registerAskCommand(plugin: ClauwritePlugin): void {
   plugin.addCommand({
     id: 'ask',
     name: t('command.ask'),
-    callback: async () => {
+    callback: () => {
       const context = getContext(plugin.app);
 
       if (!context) {

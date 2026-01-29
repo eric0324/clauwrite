@@ -160,133 +160,17 @@ ${context}` : `${prompt}${fileInfoText}`;
 };
 
 // src/api/claude-code-cli.ts
-var import_child_process = require("child_process");
-var CLI_TIMEOUT = 12e4;
 var ClaudeCodeClient = class {
-  constructor(settings) {
-    this.settings = settings;
+  constructor(_settings) {
   }
-  async sendMessage(prompt, context, history) {
-    return this.sendMessageStream(prompt, context, history || [], () => {
-    });
+  async sendMessage(_prompt, _context, _history) {
+    throw new Error("Claude Code CLI is not available in Obsidian plugins. Please use API Key mode in settings.");
   }
-  async sendMessageStream(prompt, context, history, onChunk, fileInfo) {
-    const systemPrompt = buildSystemPrompt(this.settings);
-    let historyText = "";
-    if (history.length > 0) {
-      historyText = "\n\n---\nPrevious conversation:\n";
-      for (const msg of history) {
-        const role = msg.role === "user" ? "User" : "Assistant";
-        historyText += `${role}: ${msg.content}
-
-`;
-      }
-      historyText += "---\n\n";
-    }
-    let fileInfoText = "";
-    if (fileInfo == null ? void 0 : fileInfo.path) {
-      fileInfoText = `
-
-Current file: ${fileInfo.path}`;
-      if (fileInfo.fullContent) {
-        fileInfoText += `
-
-Full file content:
-\`\`\`
-${fileInfo.fullContent}
-\`\`\``;
-      }
-    }
-    const fullPrompt = context ? `${systemPrompt}${historyText}${fileInfoText}
-
-User request: ${prompt}
-
----
-
-Selected content:
-${context}` : `${systemPrompt}${historyText}${fileInfoText}
-
-${prompt}`;
-    const args = ["-p", fullPrompt, "--output-format", "text"];
-    if (this.settings.model !== "claude-sonnet-4-20250514") {
-      args.push("--model", this.settings.model);
-    }
-    return this.executeCommandStream(args, onChunk);
+  async sendMessageStream(_prompt, _context, _history, _onChunk) {
+    throw new Error("Claude Code CLI is not available in Obsidian plugins. Please use API Key mode in settings.");
   }
   async testConnection() {
-    try {
-      await this.executeCommandStream(["--version"], () => {
-      }, 5e3);
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-  executeCommandStream(args, onChunk, timeout = CLI_TIMEOUT) {
-    return new Promise((resolve, reject) => {
-      const cliPath = this.settings.claudeCodePath || "claude";
-      console.log("Clauwrite: Executing CLI command:", cliPath, args);
-      let stdout = "";
-      let stderr = "";
-      let timedOut = false;
-      const child = (0, import_child_process.spawn)(cliPath, args, {
-        env: { ...process.env },
-        stdio: ["pipe", "pipe", "pipe"]
-      });
-      if (child.stdin) {
-        child.stdin.end();
-      }
-      const timeoutId = setTimeout(() => {
-        timedOut = true;
-        child.kill("SIGTERM");
-        reject(new Error("Request timed out"));
-      }, timeout);
-      child.stdout.on("data", (data) => {
-        const chunk = data.toString();
-        stdout += chunk;
-        onChunk(chunk);
-      });
-      child.stderr.on("data", (data) => {
-        stderr += data.toString();
-      });
-      child.on("error", (error) => {
-        clearTimeout(timeoutId);
-        console.error("Clauwrite: spawn error:", error);
-        if (error.code === "ENOENT") {
-          reject(new Error("Cannot find claude command. Check installation or path settings."));
-        } else {
-          reject(new Error(`Execution error: ${error.message}`));
-        }
-      });
-      child.on("close", (code) => {
-        clearTimeout(timeoutId);
-        if (timedOut) {
-          return;
-        }
-        if (code === 0) {
-          resolve(stdout.trim());
-        } else {
-          const output = stderr || stdout;
-          console.error("Claude CLI error output:", { code, stderr, stdout });
-          const errorMessage = this.parseErrorMessage(output);
-          reject(new Error(errorMessage || `CLI returned error code: ${code}`));
-        }
-      });
-    });
-  }
-  parseErrorMessage(output) {
-    const lowerOutput = output.toLowerCase();
-    if (lowerOutput.includes("not authenticated") || lowerOutput.includes("please login") || lowerOutput.includes("authentication")) {
-      return "Claude Code not logged in. Please run `claude` to login first.";
-    }
-    if (lowerOutput.includes("command not found") || lowerOutput.includes("not recognized")) {
-      return "Cannot find claude command. Check installation or path settings.";
-    }
-    if (output.trim()) {
-      const firstLine = output.split("\n")[0].trim();
-      return firstLine.length > 200 ? firstLine.substring(0, 200) + "..." : firstLine;
-    }
-    return "Error executing Claude Code CLI";
+    return false;
   }
 };
 
@@ -412,7 +296,7 @@ var AgentToolExecutor = class {
   /**
    * List notes in folder
    */
-  async listNotes(folder) {
+  listNotes(folder) {
     try {
       const files = [];
       const folderPath = folder ? (0, import_obsidian2.normalizePath)(folder) : "";
@@ -833,7 +717,7 @@ var ClauwriteSettingTab = class extends import_obsidian3.PluginSettingTab {
   display() {
     const { containerEl } = this;
     containerEl.empty();
-    containerEl.createEl("h2", { text: t("settings.title") });
+    new import_obsidian3.Setting(containerEl).setName(t("settings.title")).setHeading();
     if (import_obsidian3.Platform.isDesktop) {
       this.renderAuthModeSection(containerEl);
     }
@@ -846,22 +730,17 @@ var ClauwriteSettingTab = class extends import_obsidian3.PluginSettingTab {
       this.renderCliTestSetting(this.cliTestSettingEl);
     }
     this.updateAuthModeVisibility();
-    containerEl.createEl("hr");
-    containerEl.createEl("h3", { text: t("settings.model") });
+    new import_obsidian3.Setting(containerEl).setName(t("settings.model")).setHeading();
     this.renderModelSetting(containerEl);
     this.renderMaxTokensSetting(containerEl);
-    containerEl.createEl("hr");
-    containerEl.createEl("h3", { text: t("settings.preferences") });
+    new import_obsidian3.Setting(containerEl).setName(t("settings.preferences")).setHeading();
     this.renderUiLanguageSetting(containerEl);
     this.renderResponseLanguageSetting(containerEl);
-    containerEl.createEl("hr");
-    containerEl.createEl("h3", { text: t("settings.agentic") });
+    new import_obsidian3.Setting(containerEl).setName(t("settings.agentic")).setHeading();
     this.renderAgenticModeSetting(containerEl);
-    containerEl.createEl("hr");
-    containerEl.createEl("h3", { text: t("settings.prompts") });
+    new import_obsidian3.Setting(containerEl).setName(t("settings.prompts")).setHeading();
     this.renderPromptSettings(containerEl);
-    containerEl.createEl("hr");
-    containerEl.createEl("h3", { text: t("settings.conversation") });
+    new import_obsidian3.Setting(containerEl).setName(t("settings.conversation")).setHeading();
     this.renderConversationSettings(containerEl);
   }
   renderAuthModeSection(containerEl) {
@@ -916,6 +795,7 @@ var ClauwriteSettingTab = class extends import_obsidian3.PluginSettingTab {
     setting.addButton((button) => {
       button.setButtonText(t("settings.testConnection.button")).onClick(async () => {
         statusEl.empty();
+        statusEl.removeClass("clauwrite-test-status-success", "clauwrite-test-status-error");
         statusEl.setText(t("settings.testConnection.testing"));
         button.setDisabled(true);
         try {
@@ -923,14 +803,14 @@ var ClauwriteSettingTab = class extends import_obsidian3.PluginSettingTab {
           const success = await client.testConnection();
           if (success) {
             statusEl.setText("\u2705 " + t("settings.testConnection.success"));
-            statusEl.style.color = "var(--text-success)";
+            statusEl.addClass("clauwrite-test-status-success");
           } else {
             statusEl.setText("\u274C " + t("settings.testConnection.failed"));
-            statusEl.style.color = "var(--text-error)";
+            statusEl.addClass("clauwrite-test-status-error");
           }
         } catch (error) {
           statusEl.setText(`\u274C ${error instanceof Error ? error.message : t("settings.testConnection.failed")}`);
-          statusEl.style.color = "var(--text-error)";
+          statusEl.addClass("clauwrite-test-status-error");
         } finally {
           button.setDisabled(false);
         }
@@ -1053,13 +933,13 @@ var ClauwriteSettingTab = class extends import_obsidian3.PluginSettingTab {
   updateAuthModeVisibility() {
     const isApiKeyMode = this.plugin.settings.authMode === "api-key" || import_obsidian3.Platform.isMobile;
     if (this.apiKeySettingEl) {
-      this.apiKeySettingEl.style.display = isApiKeyMode ? "block" : "none";
+      this.apiKeySettingEl.toggleClass("clauwrite-hidden", !isApiKeyMode);
     }
     if (this.cliSettingEl) {
-      this.cliSettingEl.style.display = isApiKeyMode ? "none" : "block";
+      this.cliSettingEl.toggleClass("clauwrite-hidden", isApiKeyMode);
     }
     if (this.cliTestSettingEl) {
-      this.cliTestSettingEl.style.display = isApiKeyMode ? "none" : "block";
+      this.cliTestSettingEl.toggleClass("clauwrite-hidden", isApiKeyMode);
     }
   }
   maskApiKey(apiKey) {
@@ -1155,7 +1035,7 @@ var ChatView = class extends import_obsidian5.ItemView {
   getIcon() {
     return "message-circle";
   }
-  async onOpen() {
+  onOpen() {
     const container = this.containerEl.children[1];
     container.empty();
     container.addClass("clauwrite-chat-container");
@@ -1177,7 +1057,7 @@ var ChatView = class extends import_obsidian5.ItemView {
     (0, import_obsidian5.setIcon)(newChatIcon, "plus");
     newChatIcon.setAttribute("aria-label", t("chat.newChat"));
     newChatIcon.addEventListener("click", () => {
-      this.clearConversation();
+      void this.clearConversation();
     });
     const settingsIcon = actions.createSpan({ cls: "clauwrite-header-icon" });
     (0, import_obsidian5.setIcon)(settingsIcon, "settings");
@@ -1192,8 +1072,7 @@ var ChatView = class extends import_obsidian5.ItemView {
   }
   renderMessages(container) {
     this.messagesEl = container.createDiv({ cls: "clauwrite-messages" });
-    this.loadingEl = this.messagesEl.createDiv({ cls: "clauwrite-loading" });
-    this.loadingEl.style.display = "none";
+    this.loadingEl = this.messagesEl.createDiv({ cls: "clauwrite-loading clauwrite-loading-hidden" });
     const dotsContainer = this.loadingEl.createDiv({ cls: "clauwrite-loading-dots" });
     dotsContainer.createSpan({ cls: "clauwrite-loading-dot" });
     dotsContainer.createSpan({ cls: "clauwrite-loading-dot" });
@@ -1217,7 +1096,7 @@ var ChatView = class extends import_obsidian5.ItemView {
         if (message && !this.isLoading) {
           this.inputEl.value = "";
           this.inputEl.dispatchEvent(new Event("input"));
-          this.handleSendMessage(message);
+          void this.handleSendMessage(message);
         }
       }
     });
@@ -1226,7 +1105,7 @@ var ChatView = class extends import_obsidian5.ItemView {
       text: t("chat.send")
     });
     this.sendButton.addEventListener("click", () => {
-      this.sendMessage();
+      void this.sendMessage();
     });
   }
   updateContextIndicator() {
@@ -1454,7 +1333,8 @@ ${formatted.join("\n\n---\n\n")}`;
       return;
     this.streamingMessageEl.removeClass("clauwrite-message-streaming");
     this.streamingContentEl.empty();
-    import_obsidian5.MarkdownRenderer.renderMarkdown(
+    void import_obsidian5.MarkdownRenderer.render(
+      this.app,
       finalContent,
       this.streamingContentEl,
       "",
@@ -1505,7 +1385,8 @@ ${formatted.join("\n\n---\n\n")}`;
       if (msg.role === "error") {
         contentEl.setText(msg.content);
       } else {
-        import_obsidian5.MarkdownRenderer.renderMarkdown(
+        void import_obsidian5.MarkdownRenderer.render(
+          this.app,
           msg.content,
           contentEl,
           "",
@@ -1530,7 +1411,7 @@ ${formatted.join("\n\n---\n\n")}`;
   }
   setLoading(loading) {
     this.isLoading = loading;
-    this.loadingEl.style.display = loading ? "flex" : "none";
+    this.loadingEl.toggleClass("clauwrite-loading-hidden", !loading);
     this.sendButton.disabled = loading;
     if (loading) {
       this.loadingTextEl.setText(t("chat.thinking"));
@@ -1660,7 +1541,7 @@ var AskModal = class extends import_obsidian8.Modal {
     textArea.addEventListener("keydown", (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault();
-        this.submitQuestion();
+        void this.submitQuestion();
       }
     });
     const buttonContainer = contentEl.createDiv({ cls: "clauwrite-ask-modal-buttons" });
@@ -1673,7 +1554,7 @@ var AskModal = class extends import_obsidian8.Modal {
       cls: "mod-cta"
     });
     submitBtn.addEventListener("click", () => {
-      this.submitQuestion();
+      void this.submitQuestion();
     });
     setTimeout(() => textArea.focus(), 10);
   }
@@ -1700,7 +1581,7 @@ function registerAskCommand(plugin) {
   plugin.addCommand({
     id: "ask",
     name: t("command.ask"),
-    callback: async () => {
+    callback: () => {
       const context = getContext(plugin.app);
       if (!context) {
         new import_obsidian8.Notice(t("notice.openNote"));
@@ -1721,7 +1602,7 @@ var ClauwritePlugin = class extends import_obsidian9.Plugin {
       (leaf) => new ChatView(leaf, this)
     );
     this.addRibbonIcon("message-circle", "Clauwrite", () => {
-      this.activateChatView();
+      void this.activateChatView();
     });
     this.registerCommands();
     this.addSettingTab(new ClauwriteSettingTab(this.app, this));
@@ -1730,7 +1611,6 @@ var ClauwritePlugin = class extends import_obsidian9.Plugin {
     }
   }
   onunload() {
-    this.app.workspace.detachLeavesOfType(CHAT_VIEW_TYPE);
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -1743,7 +1623,7 @@ var ClauwritePlugin = class extends import_obsidian9.Plugin {
       id: "open-chat",
       name: t("command.openChat"),
       callback: () => {
-        this.activateChatView();
+        void this.activateChatView();
       }
     });
     registerSummarizeCommand(this);

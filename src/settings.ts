@@ -86,7 +86,7 @@ export class ClauwriteSettingTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: t('settings.title') });
+    new Setting(containerEl).setName(t('settings.title')).setHeading();
 
     // Auth Mode Section (hidden on mobile)
     if (Platform.isDesktop) {
@@ -109,9 +109,8 @@ export class ClauwriteSettingTab extends PluginSettingTab {
     // Update visibility based on auth mode
     this.updateAuthModeVisibility();
 
-    // Separator
-    containerEl.createEl('hr');
-    containerEl.createEl('h3', { text: t('settings.model') });
+    // Model section
+    new Setting(containerEl).setName(t('settings.model')).setHeading();
 
     // Model Selection
     this.renderModelSetting(containerEl);
@@ -119,9 +118,8 @@ export class ClauwriteSettingTab extends PluginSettingTab {
     // Max Tokens
     this.renderMaxTokensSetting(containerEl);
 
-    // Separator
-    containerEl.createEl('hr');
-    containerEl.createEl('h3', { text: t('settings.preferences') });
+    // Preferences section
+    new Setting(containerEl).setName(t('settings.preferences')).setHeading();
 
     // UI Language
     this.renderUiLanguageSetting(containerEl);
@@ -129,23 +127,20 @@ export class ClauwriteSettingTab extends PluginSettingTab {
     // Response Language
     this.renderResponseLanguageSetting(containerEl);
 
-    // Separator
-    containerEl.createEl('hr');
-    containerEl.createEl('h3', { text: t('settings.agentic') });
+    // Agentic section
+    new Setting(containerEl).setName(t('settings.agentic')).setHeading();
 
     // Agentic Mode
     this.renderAgenticModeSetting(containerEl);
 
-    // Separator
-    containerEl.createEl('hr');
-    containerEl.createEl('h3', { text: t('settings.prompts') });
+    // Prompts section
+    new Setting(containerEl).setName(t('settings.prompts')).setHeading();
 
     // Prompt Templates
     this.renderPromptSettings(containerEl);
 
-    // Separator
-    containerEl.createEl('hr');
-    containerEl.createEl('h3', { text: t('settings.conversation') });
+    // Conversation section
+    new Setting(containerEl).setName(t('settings.conversation')).setHeading();
 
     // Conversation Settings
     this.renderConversationSettings(containerEl);
@@ -174,6 +169,7 @@ export class ClauwriteSettingTab extends PluginSettingTab {
       .setDesc(t('settings.apiKey.desc'))
       .addText((text) => {
         text
+          // eslint-disable-next-line obsidianmd/ui/sentence-case -- API key format
           .setPlaceholder('sk-ant-...')
           .setValue(this.maskApiKey(this.plugin.settings.apiKey))
           .onChange(async (value) => {
@@ -203,8 +199,10 @@ export class ClauwriteSettingTab extends PluginSettingTab {
     const parts = hintText.split(/\{macCmd\}|\{winCmd\}/);
 
     descFragment.appendText(parts[0] || '');
+    // eslint-disable-next-line obsidianmd/ui/sentence-case -- shell command
     descFragment.createEl('code', { text: 'which claude' });
     descFragment.appendText(parts[1] || '');
+    // eslint-disable-next-line obsidianmd/ui/sentence-case -- shell command
     descFragment.createEl('code', { text: 'where claude' });
     descFragment.appendText(parts[2] || '');
 
@@ -213,6 +211,7 @@ export class ClauwriteSettingTab extends PluginSettingTab {
       .setDesc(descFragment)
       .addText((text) => {
         text
+          // eslint-disable-next-line obsidianmd/ui/sentence-case -- file path
           .setPlaceholder('/Users/user/.local/bin/claude')
           .setValue(this.plugin.settings.claudeCodePath)
           .onChange(async (value) => {
@@ -232,6 +231,7 @@ export class ClauwriteSettingTab extends PluginSettingTab {
     setting.addButton((button) => {
       button.setButtonText(t('settings.testConnection.button')).onClick(async () => {
         statusEl.empty();
+        statusEl.removeClass('clauwrite-test-status-success', 'clauwrite-test-status-error');
         statusEl.setText(t('settings.testConnection.testing'));
         button.setDisabled(true);
 
@@ -240,14 +240,14 @@ export class ClauwriteSettingTab extends PluginSettingTab {
           const success = await client.testConnection();
           if (success) {
             statusEl.setText('✅ ' + t('settings.testConnection.success'));
-            statusEl.style.color = 'var(--text-success)';
+            statusEl.addClass('clauwrite-test-status-success');
           } else {
             statusEl.setText('❌ ' + t('settings.testConnection.failed'));
-            statusEl.style.color = 'var(--text-error)';
+            statusEl.addClass('clauwrite-test-status-error');
           }
         } catch (error) {
           statusEl.setText(`❌ ${error instanceof Error ? error.message : t('settings.testConnection.failed')}`);
-          statusEl.style.color = 'var(--text-error)';
+          statusEl.addClass('clauwrite-test-status-error');
         } finally {
           button.setDisabled(false);
         }
@@ -456,13 +456,13 @@ export class ClauwriteSettingTab extends PluginSettingTab {
     const isApiKeyMode = this.plugin.settings.authMode === 'api-key' || Platform.isMobile;
 
     if (this.apiKeySettingEl) {
-      this.apiKeySettingEl.style.display = isApiKeyMode ? 'block' : 'none';
+      this.apiKeySettingEl.toggleClass('clauwrite-hidden', !isApiKeyMode);
     }
     if (this.cliSettingEl) {
-      this.cliSettingEl.style.display = isApiKeyMode ? 'none' : 'block';
+      this.cliSettingEl.toggleClass('clauwrite-hidden', isApiKeyMode);
     }
     if (this.cliTestSettingEl) {
-      this.cliTestSettingEl.style.display = isApiKeyMode ? 'none' : 'block';
+      this.cliTestSettingEl.toggleClass('clauwrite-hidden', isApiKeyMode);
     }
   }
 

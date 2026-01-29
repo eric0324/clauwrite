@@ -172,7 +172,7 @@ export class AgentToolExecutor {
   /**
    * List notes in folder
    */
-  private async listNotes(folder?: string): Promise<ToolResult> {
+  private listNotes(folder?: string): ToolResult {
     try {
       const files: string[] = [];
       const folderPath = folder ? normalizePath(folder) : '';

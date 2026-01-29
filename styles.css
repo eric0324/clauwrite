@@ -261,3 +261,20 @@
   justify-content: flex-end;
   gap: 8px;
 }
+
+/* Settings Styles */
+.clauwrite-test-status-success {
+  color: var(--text-success);
+}
+
+.clauwrite-test-status-error {
+  color: var(--text-error);
+}
+
+.clauwrite-hidden {
+  display: none !important;
+}
+
+.clauwrite-loading-hidden {
+  display: none !important;
+}
