@@ -10,6 +10,7 @@ import type ClauwritePlugin from '../main';
 import type { ConversationMessage } from '../settings';
 import { getContext, replaceSelection, getActiveEditor } from '../utils/context';
 import { createClaudeClient, FileInfo } from '../api/claude';
+import { parseToolCalls, AgentToolExecutor, buildAgenticSystemPrompt, ToolCall, ToolResult } from '../utils/agent-tools';
 import { t } from '../i18n';
 
 export const CHAT_VIEW_TYPE = 'clauwrite-chat-view';
@@ -19,6 +20,8 @@ interface ChatMessage {
   content: string;
   showReplaceButton?: boolean;
 }
+
+const MAX_AGENTIC_ITERATIONS = 10;
 
 export class ChatView extends ItemView {
   plugin: ClauwritePlugin;
@@ -33,10 +36,12 @@ export class ChatView extends ItemView {
   private messages: ChatMessage[] = [];
   private isLoading = false;
   private lastSelectionContent: string | null = null;
+  private toolExecutor: AgentToolExecutor;
 
   constructor(leaf: WorkspaceLeaf, plugin: ClauwritePlugin) {
     super(leaf);
     this.plugin = plugin;
+    this.toolExecutor = new AgentToolExecutor(this.app);
   }
 
   getViewType(): string {
@@ -129,7 +134,14 @@ export class ChatView extends ItemView {
     this.inputEl.addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
-        this.sendMessage();
+        e.stopPropagation();
+        const message = this.inputEl.value.trim();
+        if (message && !this.isLoading) {
+          // Clear immediately and force UI update
+          this.inputEl.value = '';
+          this.inputEl.dispatchEvent(new Event('input'));
+          this.handleSendMessage(message);
+        }
       }
     });
 
@@ -206,9 +218,12 @@ export class ChatView extends ItemView {
       return;
     }
 
-    this.updateContextIndicator();
-
     this.inputEl.value = '';
+    await this.handleSendMessage(message);
+  }
+
+  private async handleSendMessage(message: string): Promise<void> {
+    this.updateContextIndicator();
     this.addMessage('user', message);
 
     const context = getContext(this.app);
@@ -234,12 +249,24 @@ export class ChatView extends ItemView {
     this.startStreamingMessage();
 
     let fullResponse = '';
+    const isAgenticMode = this.plugin.settings.agenticMode;
 
     try {
       const client = createClaudeClient(this.plugin.settings);
       fullResponse = await client.sendMessageStream(prompt, context, history || [], (chunk) => {
         this.updateStreamingMessage(chunk);
       }, fileInfo);
+
+      // Agentic mode: check for tool calls and execute them
+      if (isAgenticMode) {
+        const { toolCalls, cleanedResponse } = parseToolCalls(fullResponse);
+
+        if (toolCalls.length > 0) {
+          // Execute tool calls and continue the conversation
+          await this.executeAgenticLoop(toolCalls, cleanedResponse, history || [], showReplaceButton);
+          return; // The agentic loop handles the rest
+        }
+      }
 
       // Parse edit blocks from response
       const { displayContent, editContent } = this.parseEditBlocks(fullResponse);
@@ -262,6 +289,128 @@ export class ChatView extends ItemView {
     } finally {
       this.setLoading(false);
     }
+  }
+
+  /**
+   * Execute agentic loop: run tools and continue conversation until no more tool calls
+   */
+  private async executeAgenticLoop(
+    initialToolCalls: ToolCall[],
+    initialCleanedResponse: string,
+    history: ConversationMessage[],
+    showReplaceButton: boolean
+  ): Promise<void> {
+    let toolCalls = initialToolCalls;
+    let cleanedResponse = initialCleanedResponse;
+    let iteration = 0;
+
+    // Update streaming message with the cleaned response (text before/after tool calls)
+    if (cleanedResponse) {
+      this.finishStreamingMessage(cleanedResponse, false);
+    } else {
+      this.cancelStreamingMessage();
+    }
+
+    while (toolCalls.length > 0 && iteration < MAX_AGENTIC_ITERATIONS) {
+      iteration++;
+
+      // Execute all tool calls
+      this.loadingTextEl.setText(t('chat.toolExecuting'));
+      const toolResults = await this.executeToolCalls(toolCalls);
+
+      // Format tool results for Claude
+      const toolResultMessage = this.formatToolResults(toolCalls, toolResults);
+
+      // Add tool result to conversation (as assistant message internally)
+      const toolResultHistory: ConversationMessage[] = [
+        ...history,
+        ...(cleanedResponse ? [{ role: 'assistant' as const, content: cleanedResponse, timestamp: Date.now() }] : []),
+        { role: 'user' as const, content: toolResultMessage, timestamp: Date.now() },
+      ];
+
+      // Continue conversation with tool results
+      this.loadingTextEl.setText(t('chat.thinking'));
+      this.startStreamingMessage();
+
+      let nextResponse = '';
+      try {
+        const client = createClaudeClient(this.plugin.settings);
+        nextResponse = await client.sendMessageStream(
+          toolResultMessage,
+          undefined,
+          toolResultHistory.slice(0, -1), // Exclude the message we're sending
+          (chunk) => {
+            this.updateStreamingMessage(chunk);
+          }
+        );
+      } catch (error) {
+        this.cancelStreamingMessage();
+        const errorMessage = this.extractErrorMessage(error);
+        this.addMessage('error', errorMessage);
+        this.setLoading(false);
+        return;
+      }
+
+      // Parse response for more tool calls
+      const parsed = parseToolCalls(nextResponse);
+      toolCalls = parsed.toolCalls;
+      cleanedResponse = parsed.cleanedResponse;
+      history = toolResultHistory;
+
+      if (toolCalls.length === 0) {
+        // No more tool calls, finish with the response
+        const { displayContent, editContent } = this.parseEditBlocks(nextResponse);
+
+        if (editContent) {
+          await this.applyEditToFile(editContent);
+        }
+
+        const contentToDisplay = displayContent || cleanedResponse || nextResponse;
+        this.finishStreamingMessage(contentToDisplay, showReplaceButton);
+      } else if (cleanedResponse) {
+        // More tool calls, display intermediate response
+        this.finishStreamingMessage(cleanedResponse, false);
+      } else {
+        this.cancelStreamingMessage();
+      }
+    }
+
+    if (iteration >= MAX_AGENTIC_ITERATIONS) {
+      this.addMessage('error', `Reached maximum iterations (${MAX_AGENTIC_ITERATIONS})`);
+    }
+
+    await this.saveConversationHistory();
+    this.setLoading(false);
+  }
+
+  /**
+   * Execute tool calls and return results
+   */
+  private async executeToolCalls(toolCalls: ToolCall[]): Promise<ToolResult[]> {
+    const results: ToolResult[] = [];
+
+    for (const toolCall of toolCalls) {
+      const result = await this.toolExecutor.execute(toolCall);
+      results.push(result);
+    }
+
+    return results;
+  }
+
+  /**
+   * Format tool results for Claude
+   */
+  private formatToolResults(toolCalls: ToolCall[], results: ToolResult[]): string {
+    const formatted = toolCalls.map((call, i) => {
+      const result = results[i];
+      if (result.success) {
+        return `Tool: ${call.tool}\nResult:\n${result.result}`;
+      } else {
+        return `Tool: ${call.tool}\nError: ${result.error}`;
+      }
+    });
+
+    return `Tool execution results:\n\n${formatted.join('\n\n---\n\n')}`;
   }
 
   async sendPromptWithContext(prompt: string, showReplaceButton = false): Promise<void> {

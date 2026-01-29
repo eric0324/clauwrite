@@ -31,6 +31,7 @@ export interface ClauwriteSettings {
   maxHistoryLength: number;
   conversationHistory: ConversationMessage[];
   isFirstLoad: boolean;
+  agenticMode: boolean;
 }
 
 export const DEFAULT_PROMPTS: PromptTemplates = {
@@ -60,6 +61,7 @@ export const DEFAULT_SETTINGS: ClauwriteSettings = {
   maxHistoryLength: 20,
   conversationHistory: [],
   isFirstLoad: true,
+  agenticMode: false,
 };
 
 const AVAILABLE_MODELS = [
@@ -126,6 +128,13 @@ export class ClauwriteSettingTab extends PluginSettingTab {
 
     // Response Language
     this.renderResponseLanguageSetting(containerEl);
+
+    // Separator
+    containerEl.createEl('hr');
+    containerEl.createEl('h3', { text: t('settings.agentic') });
+
+    // Agentic Mode
+    this.renderAgenticModeSetting(containerEl);
 
     // Separator
     containerEl.createEl('hr');
@@ -389,6 +398,20 @@ export class ClauwriteSettingTab extends PluginSettingTab {
             this.plugin.settings.prompts = { ...DEFAULT_PROMPTS };
             await this.plugin.saveSettings();
             this.display();
+          });
+      });
+  }
+
+  private renderAgenticModeSetting(containerEl: HTMLElement): void {
+    new Setting(containerEl)
+      .setName(t('settings.agentic.enable'))
+      .setDesc(t('settings.agentic.desc'))
+      .addToggle((toggle) => {
+        toggle
+          .setValue(this.plugin.settings.agenticMode)
+          .onChange(async (value) => {
+            this.plugin.settings.agenticMode = value;
+            await this.plugin.saveSettings();
           });
       });
   }

@@ -22,10 +22,10 @@ __export(main_exports, {
   default: () => ClauwritePlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian8 = require("obsidian");
+var import_obsidian9 = require("obsidian");
 
 // src/settings.ts
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 
 // src/api/anthropic-api.ts
 var import_obsidian = require("obsidian");
@@ -290,6 +290,275 @@ ${prompt}`;
   }
 };
 
+// src/utils/agent-tools.ts
+var import_obsidian2 = require("obsidian");
+function parseToolCalls(response) {
+  const toolPattern = /<<<TOOL:(\w+)>>>\n([\s\S]*?)<<<END_TOOL>>>/g;
+  const toolCalls = [];
+  let cleanedResponse = response;
+  let match;
+  while ((match = toolPattern.exec(response)) !== null) {
+    const toolName = match[1];
+    const paramBlock = match[2];
+    const params = parseToolParams(paramBlock);
+    toolCalls.push({ tool: toolName, params });
+    cleanedResponse = cleanedResponse.replace(match[0], "");
+  }
+  return { toolCalls, cleanedResponse: cleanedResponse.trim() };
+}
+function parseToolParams(paramBlock) {
+  const params = {};
+  const lines = paramBlock.split("\n");
+  let currentKey = "";
+  let currentValue = [];
+  let isMultiline = false;
+  for (const line of lines) {
+    const keyMatch = line.match(/^(\w+):\s*(.*)/);
+    if (keyMatch && !isMultiline) {
+      if (currentKey) {
+        params[currentKey] = currentValue.join("\n").trim();
+      }
+      currentKey = keyMatch[1];
+      const value = keyMatch[2];
+      if (value === "" || value === void 0) {
+        isMultiline = true;
+        currentValue = [];
+      } else {
+        currentValue = [value];
+        isMultiline = false;
+      }
+    } else if (currentKey) {
+      currentValue.push(line);
+      isMultiline = true;
+    }
+  }
+  if (currentKey) {
+    params[currentKey] = currentValue.join("\n").trim();
+  }
+  return params;
+}
+var AgentToolExecutor = class {
+  constructor(app) {
+    this.app = app;
+  }
+  async execute(toolCall) {
+    const { tool, params } = toolCall;
+    switch (tool) {
+      case "read_note":
+        return this.readNote(params.path);
+      case "write_note":
+        return this.writeNote(params.path, params.content);
+      case "list_notes":
+        return this.listNotes(params.folder);
+      case "search_notes":
+        return this.searchNotes(params.query);
+      case "create_folder":
+        return this.createFolder(params.path);
+      default:
+        return { success: false, error: `Unknown tool: ${tool}` };
+    }
+  }
+  /**
+   * Read note content
+   */
+  async readNote(path) {
+    if (!path) {
+      return { success: false, error: "Path is required" };
+    }
+    const normalizedPath = (0, import_obsidian2.normalizePath)(path);
+    const file = this.app.vault.getAbstractFileByPath(normalizedPath);
+    if (!file) {
+      return { success: false, error: `File not found: ${path}` };
+    }
+    if (!(file instanceof import_obsidian2.TFile)) {
+      return { success: false, error: `Not a file: ${path}` };
+    }
+    try {
+      const content = await this.app.vault.read(file);
+      return { success: true, result: content };
+    } catch (error) {
+      return { success: false, error: `Failed to read file: ${error}` };
+    }
+  }
+  /**
+   * Write or create note
+   */
+  async writeNote(path, content) {
+    if (!path) {
+      return { success: false, error: "Path is required" };
+    }
+    if (content === void 0 || content === null) {
+      return { success: false, error: "Content is required" };
+    }
+    const normalizedPath = (0, import_obsidian2.normalizePath)(path);
+    const finalPath = normalizedPath.endsWith(".md") ? normalizedPath : `${normalizedPath}.md`;
+    try {
+      const existingFile = this.app.vault.getAbstractFileByPath(finalPath);
+      if (existingFile instanceof import_obsidian2.TFile) {
+        await this.app.vault.modify(existingFile, content);
+        return { success: true, result: `Updated: ${finalPath}` };
+      } else {
+        const parentPath = finalPath.substring(0, finalPath.lastIndexOf("/"));
+        if (parentPath) {
+          await this.ensureFolderExists(parentPath);
+        }
+        await this.app.vault.create(finalPath, content);
+        return { success: true, result: `Created: ${finalPath}` };
+      }
+    } catch (error) {
+      return { success: false, error: `Failed to write file: ${error}` };
+    }
+  }
+  /**
+   * List notes in folder
+   */
+  async listNotes(folder) {
+    try {
+      const files = [];
+      const folderPath = folder ? (0, import_obsidian2.normalizePath)(folder) : "";
+      if (folderPath) {
+        const targetFolder = this.app.vault.getAbstractFileByPath(folderPath);
+        if (!targetFolder) {
+          return { success: false, error: `Folder not found: ${folder}` };
+        }
+        if (!(targetFolder instanceof import_obsidian2.TFolder)) {
+          return { success: false, error: `Not a folder: ${folder}` };
+        }
+        this.collectFilesFromFolder(targetFolder, files);
+      } else {
+        const allFiles = this.app.vault.getMarkdownFiles();
+        files.push(...allFiles.map((f) => f.path));
+      }
+      if (files.length === 0) {
+        return { success: true, result: "No notes found." };
+      }
+      return { success: true, result: files.join("\n") };
+    } catch (error) {
+      return { success: false, error: `Failed to list notes: ${error}` };
+    }
+  }
+  /**
+   * Recursively collect files from folder
+   */
+  collectFilesFromFolder(folder, files) {
+    for (const child of folder.children) {
+      if (child instanceof import_obsidian2.TFile && child.extension === "md") {
+        files.push(child.path);
+      } else if (child instanceof import_obsidian2.TFolder) {
+        this.collectFilesFromFolder(child, files);
+      }
+    }
+  }
+  /**
+   * Search notes by content
+   */
+  async searchNotes(query) {
+    if (!query) {
+      return { success: false, error: "Query is required" };
+    }
+    try {
+      const results = [];
+      const files = this.app.vault.getMarkdownFiles();
+      const queryLower = query.toLowerCase();
+      for (const file of files) {
+        const content = await this.app.vault.cachedRead(file);
+        if (content.toLowerCase().includes(queryLower)) {
+          const lines = content.split("\n");
+          const matchingLines = [];
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].toLowerCase().includes(queryLower)) {
+              matchingLines.push(`  Line ${i + 1}: ${lines[i].trim().substring(0, 100)}`);
+              if (matchingLines.length >= 3)
+                break;
+            }
+          }
+          results.push(`${file.path}
+${matchingLines.join("\n")}`);
+        }
+      }
+      if (results.length === 0) {
+        return { success: true, result: `No notes found containing "${query}".` };
+      }
+      return { success: true, result: results.join("\n\n") };
+    } catch (error) {
+      return { success: false, error: `Failed to search notes: ${error}` };
+    }
+  }
+  /**
+   * Create folder
+   */
+  async createFolder(path) {
+    if (!path) {
+      return { success: false, error: "Path is required" };
+    }
+    try {
+      await this.ensureFolderExists((0, import_obsidian2.normalizePath)(path));
+      return { success: true, result: `Folder created: ${path}` };
+    } catch (error) {
+      return { success: false, error: `Failed to create folder: ${error}` };
+    }
+  }
+  /**
+   * Ensure folder exists, creating it if necessary
+   */
+  async ensureFolderExists(path) {
+    const normalizedPath = (0, import_obsidian2.normalizePath)(path);
+    const folder = this.app.vault.getAbstractFileByPath(normalizedPath);
+    if (folder instanceof import_obsidian2.TFolder) {
+      return;
+    }
+    await this.app.vault.createFolder(normalizedPath);
+  }
+};
+function buildAgenticSystemPrompt(basePrompt) {
+  const toolDocs = `
+You have access to the following tools for working with notes in the vault:
+
+## Available Tools
+
+### read_note
+Read the content of a note.
+<<<TOOL:read_note>>>
+path: path/to/note.md
+<<<END_TOOL>>>
+
+### write_note
+Create or overwrite a note.
+<<<TOOL:write_note>>>
+path: path/to/note.md
+content:
+(note content here)
+<<<END_TOOL>>>
+
+### list_notes
+List notes in a folder. If folder is omitted, lists all notes.
+<<<TOOL:list_notes>>>
+folder: path/to/folder
+<<<END_TOOL>>>
+
+### search_notes
+Search for notes containing a query.
+<<<TOOL:search_notes>>>
+query: search term
+<<<END_TOOL>>>
+
+### create_folder
+Create a new folder.
+<<<TOOL:create_folder>>>
+path: path/to/folder
+<<<END_TOOL>>>
+
+## Important Notes
+- After using a tool, wait for the result before continuing.
+- You can use multiple tools in one response if needed.
+- Tool results will be provided in the next message.
+- Always confirm with the user before making significant changes.
+`;
+  return `${basePrompt}
+
+${toolDocs}`;
+}
+
 // src/api/claude.ts
 function createClaudeClient(settings) {
   if (settings.authMode === "api-key") {
@@ -299,8 +568,12 @@ function createClaudeClient(settings) {
 }
 function buildSystemPrompt(settings) {
   const langInstruction = settings.responseLanguage === "zh-TW" ? "Respond in Traditional Chinese (\u7E41\u9AD4\u4E2D\u6587)." : "Respond in English.";
-  return `${settings.prompts.system}
+  const basePrompt = `${settings.prompts.system}
 ${langInstruction}`;
+  if (settings.agenticMode) {
+    return buildAgenticSystemPrompt(basePrompt);
+  }
+  return basePrompt;
 }
 
 // src/i18n/index.ts
@@ -350,6 +623,9 @@ var translations = {
     "settings.clearHistory.desc": "\u522A\u9664\u6240\u6709\u5132\u5B58\u7684\u5C0D\u8A71\u8A18\u9304",
     "settings.clearHistory.button": "\u6E05\u9664",
     "settings.clearHistory.done": "\u5DF2\u6E05\u9664\u5C0D\u8A71\u6B77\u53F2",
+    "settings.agentic": "Agentic \u6A21\u5F0F",
+    "settings.agentic.enable": "\u555F\u7528 Agentic \u6A21\u5F0F",
+    "settings.agentic.desc": "\u5141\u8A31 Claude \u81EA\u52D5\u8B80\u53D6\u3001\u5275\u5EFA\u3001\u7DE8\u8F2F\u548C\u641C\u5C0B\u7B46\u8A18",
     // Chat View
     "chat.title": "Clauwrite",
     "chat.context": "Context",
@@ -365,6 +641,8 @@ var translations = {
     "chat.newChat": "\u65B0\u5C0D\u8A71",
     "chat.clearConfirm": "\u78BA\u5B9A\u8981\u6E05\u9664\u5C0D\u8A71\u6B77\u53F2\u55CE\uFF1F",
     "chat.fileUpdated": "\u6A94\u6848\u5DF2\u66F4\u65B0",
+    "chat.toolExecuting": "\u57F7\u884C\u5DE5\u5177\u4E2D...",
+    "chat.toolResult": "\u5DE5\u5177\u7D50\u679C",
     // Commands
     "command.openChat": "\u958B\u555F\u5C0D\u8A71\u8996\u7A97",
     "command.summarize": "\u6458\u8981\u7576\u524D\u5167\u5BB9",
@@ -442,6 +720,9 @@ var translations = {
     "settings.clearHistory.desc": "Delete all saved conversation history",
     "settings.clearHistory.button": "Clear",
     "settings.clearHistory.done": "Conversation history cleared",
+    "settings.agentic": "Agentic Mode",
+    "settings.agentic.enable": "Enable Agentic Mode",
+    "settings.agentic.desc": "Allow Claude to read, create, edit, and search notes automatically",
     // Chat View
     "chat.title": "Clauwrite",
     "chat.context": "Context",
@@ -457,6 +738,8 @@ var translations = {
     "chat.newChat": "New Chat",
     "chat.clearConfirm": "Clear conversation history?",
     "chat.fileUpdated": "File updated",
+    "chat.toolExecuting": "Executing tool...",
+    "chat.toolResult": "Tool result",
     // Commands
     "command.openChat": "Open Chat",
     "command.summarize": "Summarize Content",
@@ -530,7 +813,8 @@ var DEFAULT_SETTINGS = {
   prompts: { ...DEFAULT_PROMPTS },
   maxHistoryLength: 20,
   conversationHistory: [],
-  isFirstLoad: true
+  isFirstLoad: true,
+  agenticMode: false
 };
 var AVAILABLE_MODELS = [
   { value: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
@@ -538,7 +822,7 @@ var AVAILABLE_MODELS = [
   { value: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet" },
   { value: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku" }
 ];
-var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
+var ClauwriteSettingTab = class extends import_obsidian3.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.apiKeySettingEl = null;
@@ -550,12 +834,12 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: t("settings.title") });
-    if (import_obsidian2.Platform.isDesktop) {
+    if (import_obsidian3.Platform.isDesktop) {
       this.renderAuthModeSection(containerEl);
     }
     this.apiKeySettingEl = containerEl.createDiv();
     this.renderApiKeySetting(this.apiKeySettingEl);
-    if (import_obsidian2.Platform.isDesktop) {
+    if (import_obsidian3.Platform.isDesktop) {
       this.cliSettingEl = containerEl.createDiv();
       this.renderCliPathSetting(this.cliSettingEl);
       this.cliTestSettingEl = containerEl.createDiv();
@@ -571,6 +855,9 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     this.renderUiLanguageSetting(containerEl);
     this.renderResponseLanguageSetting(containerEl);
     containerEl.createEl("hr");
+    containerEl.createEl("h3", { text: t("settings.agentic") });
+    this.renderAgenticModeSetting(containerEl);
+    containerEl.createEl("hr");
     containerEl.createEl("h3", { text: t("settings.prompts") });
     this.renderPromptSettings(containerEl);
     containerEl.createEl("hr");
@@ -578,7 +865,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     this.renderConversationSettings(containerEl);
   }
   renderAuthModeSection(containerEl) {
-    new import_obsidian2.Setting(containerEl).setName(t("settings.authMode")).setDesc(t("settings.authMode.desc")).addDropdown((dropdown) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.authMode")).setDesc(t("settings.authMode.desc")).addDropdown((dropdown) => {
       dropdown.addOption("api-key", t("settings.authMode.apiKey")).addOption("claude-code", t("settings.authMode.cli")).setValue(this.plugin.settings.authMode).onChange(async (value) => {
         this.plugin.settings.authMode = value;
         await this.plugin.saveSettings();
@@ -587,7 +874,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     });
   }
   renderApiKeySetting(containerEl) {
-    new import_obsidian2.Setting(containerEl).setName(t("settings.apiKey")).setDesc(t("settings.apiKey.desc")).addText((text) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.apiKey")).setDesc(t("settings.apiKey.desc")).addText((text) => {
       text.setPlaceholder("sk-ant-...").setValue(this.maskApiKey(this.plugin.settings.apiKey)).onChange(async (value) => {
         if (!value.includes("\u2022\u2022\u2022\u2022")) {
           this.plugin.settings.apiKey = value;
@@ -616,7 +903,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     descFragment.appendText(parts[1] || "");
     descFragment.createEl("code", { text: "where claude" });
     descFragment.appendText(parts[2] || "");
-    new import_obsidian2.Setting(containerEl).setName(t("settings.cliPath")).setDesc(descFragment).addText((text) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.cliPath")).setDesc(descFragment).addText((text) => {
       text.setPlaceholder("/Users/user/.local/bin/claude").setValue(this.plugin.settings.claudeCodePath).onChange(async (value) => {
         this.plugin.settings.claudeCodePath = value || "claude";
         await this.plugin.saveSettings();
@@ -624,7 +911,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     });
   }
   renderCliTestSetting(containerEl) {
-    const setting = new import_obsidian2.Setting(containerEl).setName(t("settings.testConnection")).setDesc(t("settings.testConnection.desc"));
+    const setting = new import_obsidian3.Setting(containerEl).setName(t("settings.testConnection")).setDesc(t("settings.testConnection.desc"));
     const statusEl = containerEl.createSpan({ cls: "clauwrite-test-status" });
     setting.addButton((button) => {
       button.setButtonText(t("settings.testConnection.button")).onClick(async () => {
@@ -651,7 +938,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     });
   }
   renderModelSetting(containerEl) {
-    new import_obsidian2.Setting(containerEl).setName(t("settings.model.select")).setDesc(t("settings.model.desc")).addDropdown((dropdown) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.model.select")).setDesc(t("settings.model.desc")).addDropdown((dropdown) => {
       AVAILABLE_MODELS.forEach((model) => {
         dropdown.addOption(model.value, model.name);
       });
@@ -662,7 +949,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     });
   }
   renderMaxTokensSetting(containerEl) {
-    new import_obsidian2.Setting(containerEl).setName(t("settings.maxTokens")).setDesc(t("settings.maxTokens.desc")).addText((text) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.maxTokens")).setDesc(t("settings.maxTokens.desc")).addText((text) => {
       text.setPlaceholder("4096").setValue(String(this.plugin.settings.maxTokens)).onChange(async (value) => {
         const num = parseInt(value, 10);
         if (!isNaN(num) && num > 0) {
@@ -676,7 +963,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     });
   }
   renderUiLanguageSetting(containerEl) {
-    new import_obsidian2.Setting(containerEl).setName(t("settings.language")).setDesc(t("settings.language.desc")).addDropdown((dropdown) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.language")).setDesc(t("settings.language.desc")).addDropdown((dropdown) => {
       dropdown.addOption("zh-TW", "\u7E41\u9AD4\u4E2D\u6587").addOption("en", "English").setValue(this.plugin.settings.uiLanguage).onChange(async (value) => {
         this.plugin.settings.uiLanguage = value;
         setLanguage(value);
@@ -686,7 +973,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     });
   }
   renderResponseLanguageSetting(containerEl) {
-    new import_obsidian2.Setting(containerEl).setName(t("settings.responseLanguage")).setDesc(t("settings.responseLanguage.desc")).addDropdown((dropdown) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.responseLanguage")).setDesc(t("settings.responseLanguage.desc")).addDropdown((dropdown) => {
       dropdown.addOption("zh-TW", "\u7E41\u9AD4\u4E2D\u6587").addOption("en", "English").setValue(this.plugin.settings.responseLanguage).onChange(async (value) => {
         this.plugin.settings.responseLanguage = value;
         await this.plugin.saveSettings();
@@ -694,7 +981,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     });
   }
   renderPromptSettings(containerEl) {
-    new import_obsidian2.Setting(containerEl).setName(t("settings.prompts.system")).setDesc(t("settings.prompts.system.desc")).addTextArea((text) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.prompts.system")).setDesc(t("settings.prompts.system.desc")).addTextArea((text) => {
       text.setValue(this.plugin.settings.prompts.system).onChange(async (value) => {
         this.plugin.settings.prompts.system = value;
         await this.plugin.saveSettings();
@@ -702,7 +989,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
       text.inputEl.rows = 3;
       text.inputEl.cols = 40;
     });
-    new import_obsidian2.Setting(containerEl).setName(t("settings.prompts.summarize")).setDesc(t("settings.prompts.summarize.desc")).addTextArea((text) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.prompts.summarize")).setDesc(t("settings.prompts.summarize.desc")).addTextArea((text) => {
       text.setValue(this.plugin.settings.prompts.summarize).onChange(async (value) => {
         this.plugin.settings.prompts.summarize = value;
         await this.plugin.saveSettings();
@@ -710,7 +997,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
       text.inputEl.rows = 2;
       text.inputEl.cols = 40;
     });
-    new import_obsidian2.Setting(containerEl).setName(t("settings.prompts.rewrite")).setDesc(t("settings.prompts.rewrite.desc")).addTextArea((text) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.prompts.rewrite")).setDesc(t("settings.prompts.rewrite.desc")).addTextArea((text) => {
       text.setValue(this.plugin.settings.prompts.rewrite).onChange(async (value) => {
         this.plugin.settings.prompts.rewrite = value;
         await this.plugin.saveSettings();
@@ -718,7 +1005,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
       text.inputEl.rows = 2;
       text.inputEl.cols = 40;
     });
-    new import_obsidian2.Setting(containerEl).setName(t("settings.prompts.ask")).setDesc(t("settings.prompts.ask.desc")).addTextArea((text) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.prompts.ask")).setDesc(t("settings.prompts.ask.desc")).addTextArea((text) => {
       text.setValue(this.plugin.settings.prompts.ask).onChange(async (value) => {
         this.plugin.settings.prompts.ask = value;
         await this.plugin.saveSettings();
@@ -726,7 +1013,7 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
       text.inputEl.rows = 2;
       text.inputEl.cols = 40;
     });
-    new import_obsidian2.Setting(containerEl).addButton((button) => {
+    new import_obsidian3.Setting(containerEl).addButton((button) => {
       button.setButtonText(t("settings.prompts.reset")).onClick(async () => {
         this.plugin.settings.prompts = { ...DEFAULT_PROMPTS };
         await this.plugin.saveSettings();
@@ -734,8 +1021,16 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
       });
     });
   }
+  renderAgenticModeSetting(containerEl) {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.agentic.enable")).setDesc(t("settings.agentic.desc")).addToggle((toggle) => {
+      toggle.setValue(this.plugin.settings.agenticMode).onChange(async (value) => {
+        this.plugin.settings.agenticMode = value;
+        await this.plugin.saveSettings();
+      });
+    });
+  }
   renderConversationSettings(containerEl) {
-    new import_obsidian2.Setting(containerEl).setName(t("settings.maxHistory")).setDesc(t("settings.maxHistory.desc")).addText((text) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.maxHistory")).setDesc(t("settings.maxHistory.desc")).addText((text) => {
       text.setPlaceholder("20").setValue(String(this.plugin.settings.maxHistoryLength)).onChange(async (value) => {
         const num = parseInt(value, 10);
         if (!isNaN(num) && num >= 0) {
@@ -747,16 +1042,16 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
       text.inputEl.min = "0";
       text.inputEl.max = "100";
     });
-    new import_obsidian2.Setting(containerEl).setName(t("settings.clearHistory")).setDesc(t("settings.clearHistory.desc")).addButton((button) => {
+    new import_obsidian3.Setting(containerEl).setName(t("settings.clearHistory")).setDesc(t("settings.clearHistory.desc")).addButton((button) => {
       button.setButtonText(t("settings.clearHistory.button")).onClick(async () => {
         this.plugin.settings.conversationHistory = [];
         await this.plugin.saveSettings();
-        new import_obsidian2.Notice(t("settings.clearHistory.done"));
+        new import_obsidian3.Notice(t("settings.clearHistory.done"));
       });
     });
   }
   updateAuthModeVisibility() {
-    const isApiKeyMode = this.plugin.settings.authMode === "api-key" || import_obsidian2.Platform.isMobile;
+    const isApiKeyMode = this.plugin.settings.authMode === "api-key" || import_obsidian3.Platform.isMobile;
     if (this.apiKeySettingEl) {
       this.apiKeySettingEl.style.display = isApiKeyMode ? "block" : "none";
     }
@@ -777,18 +1072,18 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
 };
 
 // src/views/ChatView.ts
-var import_obsidian4 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 
 // src/utils/context.ts
-var import_obsidian3 = require("obsidian");
+var import_obsidian4 = require("obsidian");
 function getMarkdownView(app) {
-  const activeView = app.workspace.getActiveViewOfType(import_obsidian3.MarkdownView);
+  const activeView = app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
   if (activeView) {
     return activeView;
   }
   let markdownView = null;
   app.workspace.iterateAllLeaves((leaf) => {
-    if (!markdownView && leaf.view instanceof import_obsidian3.MarkdownView) {
+    if (!markdownView && leaf.view instanceof import_obsidian4.MarkdownView) {
       markdownView = leaf.view;
     }
   });
@@ -839,7 +1134,8 @@ function replaceSelection(editor, newContent) {
 
 // src/views/ChatView.ts
 var CHAT_VIEW_TYPE = "clauwrite-chat-view";
-var ChatView = class extends import_obsidian4.ItemView {
+var MAX_AGENTIC_ITERATIONS = 10;
+var ChatView = class extends import_obsidian5.ItemView {
   constructor(leaf, plugin) {
     super(leaf);
     this.streamingMessageEl = null;
@@ -848,6 +1144,7 @@ var ChatView = class extends import_obsidian4.ItemView {
     this.isLoading = false;
     this.lastSelectionContent = null;
     this.plugin = plugin;
+    this.toolExecutor = new AgentToolExecutor(this.app);
   }
   getViewType() {
     return CHAT_VIEW_TYPE;
@@ -877,13 +1174,13 @@ var ChatView = class extends import_obsidian4.ItemView {
     header.createSpan({ cls: "clauwrite-header-title", text: t("chat.title") });
     const actions = header.createDiv({ cls: "clauwrite-header-actions" });
     const newChatIcon = actions.createSpan({ cls: "clauwrite-header-icon" });
-    (0, import_obsidian4.setIcon)(newChatIcon, "plus");
+    (0, import_obsidian5.setIcon)(newChatIcon, "plus");
     newChatIcon.setAttribute("aria-label", t("chat.newChat"));
     newChatIcon.addEventListener("click", () => {
       this.clearConversation();
     });
     const settingsIcon = actions.createSpan({ cls: "clauwrite-header-icon" });
-    (0, import_obsidian4.setIcon)(settingsIcon, "settings");
+    (0, import_obsidian5.setIcon)(settingsIcon, "settings");
     settingsIcon.addEventListener("click", () => {
       this.app.setting.open();
       this.app.setting.openTabById("clauwrite");
@@ -915,7 +1212,13 @@ var ChatView = class extends import_obsidian4.ItemView {
     this.inputEl.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
-        this.sendMessage();
+        e.stopPropagation();
+        const message = this.inputEl.value.trim();
+        if (message && !this.isLoading) {
+          this.inputEl.value = "";
+          this.inputEl.dispatchEvent(new Event("input"));
+          this.handleSendMessage(message);
+        }
       }
     });
     this.sendButton = inputArea.createEl("button", {
@@ -975,8 +1278,11 @@ var ChatView = class extends import_obsidian4.ItemView {
     if (!message || this.isLoading) {
       return;
     }
-    this.updateContextIndicator();
     this.inputEl.value = "";
+    await this.handleSendMessage(message);
+  }
+  async handleSendMessage(message) {
+    this.updateContextIndicator();
     this.addMessage("user", message);
     const context = getContext(this.app);
     const history = this.getConversationHistory().slice(0, -1);
@@ -990,11 +1296,19 @@ var ChatView = class extends import_obsidian4.ItemView {
     this.setLoading(true);
     this.startStreamingMessage();
     let fullResponse = "";
+    const isAgenticMode = this.plugin.settings.agenticMode;
     try {
       const client = createClaudeClient(this.plugin.settings);
       fullResponse = await client.sendMessageStream(prompt, context, history || [], (chunk) => {
         this.updateStreamingMessage(chunk);
       }, fileInfo);
+      if (isAgenticMode) {
+        const { toolCalls, cleanedResponse } = parseToolCalls(fullResponse);
+        if (toolCalls.length > 0) {
+          await this.executeAgenticLoop(toolCalls, cleanedResponse, history || [], showReplaceButton);
+          return;
+        }
+      }
       const { displayContent, editContent } = this.parseEditBlocks(fullResponse);
       if (editContent) {
         await this.applyEditToFile(editContent);
@@ -1009,6 +1323,102 @@ var ChatView = class extends import_obsidian4.ItemView {
     } finally {
       this.setLoading(false);
     }
+  }
+  /**
+   * Execute agentic loop: run tools and continue conversation until no more tool calls
+   */
+  async executeAgenticLoop(initialToolCalls, initialCleanedResponse, history, showReplaceButton) {
+    let toolCalls = initialToolCalls;
+    let cleanedResponse = initialCleanedResponse;
+    let iteration = 0;
+    if (cleanedResponse) {
+      this.finishStreamingMessage(cleanedResponse, false);
+    } else {
+      this.cancelStreamingMessage();
+    }
+    while (toolCalls.length > 0 && iteration < MAX_AGENTIC_ITERATIONS) {
+      iteration++;
+      this.loadingTextEl.setText(t("chat.toolExecuting"));
+      const toolResults = await this.executeToolCalls(toolCalls);
+      const toolResultMessage = this.formatToolResults(toolCalls, toolResults);
+      const toolResultHistory = [
+        ...history,
+        ...cleanedResponse ? [{ role: "assistant", content: cleanedResponse, timestamp: Date.now() }] : [],
+        { role: "user", content: toolResultMessage, timestamp: Date.now() }
+      ];
+      this.loadingTextEl.setText(t("chat.thinking"));
+      this.startStreamingMessage();
+      let nextResponse = "";
+      try {
+        const client = createClaudeClient(this.plugin.settings);
+        nextResponse = await client.sendMessageStream(
+          toolResultMessage,
+          void 0,
+          toolResultHistory.slice(0, -1),
+          // Exclude the message we're sending
+          (chunk) => {
+            this.updateStreamingMessage(chunk);
+          }
+        );
+      } catch (error) {
+        this.cancelStreamingMessage();
+        const errorMessage = this.extractErrorMessage(error);
+        this.addMessage("error", errorMessage);
+        this.setLoading(false);
+        return;
+      }
+      const parsed = parseToolCalls(nextResponse);
+      toolCalls = parsed.toolCalls;
+      cleanedResponse = parsed.cleanedResponse;
+      history = toolResultHistory;
+      if (toolCalls.length === 0) {
+        const { displayContent, editContent } = this.parseEditBlocks(nextResponse);
+        if (editContent) {
+          await this.applyEditToFile(editContent);
+        }
+        const contentToDisplay = displayContent || cleanedResponse || nextResponse;
+        this.finishStreamingMessage(contentToDisplay, showReplaceButton);
+      } else if (cleanedResponse) {
+        this.finishStreamingMessage(cleanedResponse, false);
+      } else {
+        this.cancelStreamingMessage();
+      }
+    }
+    if (iteration >= MAX_AGENTIC_ITERATIONS) {
+      this.addMessage("error", `Reached maximum iterations (${MAX_AGENTIC_ITERATIONS})`);
+    }
+    await this.saveConversationHistory();
+    this.setLoading(false);
+  }
+  /**
+   * Execute tool calls and return results
+   */
+  async executeToolCalls(toolCalls) {
+    const results = [];
+    for (const toolCall of toolCalls) {
+      const result = await this.toolExecutor.execute(toolCall);
+      results.push(result);
+    }
+    return results;
+  }
+  /**
+   * Format tool results for Claude
+   */
+  formatToolResults(toolCalls, results) {
+    const formatted = toolCalls.map((call, i) => {
+      const result = results[i];
+      if (result.success) {
+        return `Tool: ${call.tool}
+Result:
+${result.result}`;
+      } else {
+        return `Tool: ${call.tool}
+Error: ${result.error}`;
+      }
+    });
+    return `Tool execution results:
+
+${formatted.join("\n\n---\n\n")}`;
   }
   async sendPromptWithContext(prompt, showReplaceButton = false) {
     this.addMessage("user", prompt);
@@ -1044,7 +1454,7 @@ var ChatView = class extends import_obsidian4.ItemView {
       return;
     this.streamingMessageEl.removeClass("clauwrite-message-streaming");
     this.streamingContentEl.empty();
-    import_obsidian4.MarkdownRenderer.renderMarkdown(
+    import_obsidian5.MarkdownRenderer.renderMarkdown(
       finalContent,
       this.streamingContentEl,
       "",
@@ -1095,7 +1505,7 @@ var ChatView = class extends import_obsidian4.ItemView {
       if (msg.role === "error") {
         contentEl.setText(msg.content);
       } else {
-        import_obsidian4.MarkdownRenderer.renderMarkdown(
+        import_obsidian5.MarkdownRenderer.renderMarkdown(
           msg.content,
           contentEl,
           "",
@@ -1160,32 +1570,32 @@ var ChatView = class extends import_obsidian4.ItemView {
    * Apply edit to the current file
    */
   async applyEditToFile(newContent) {
-    let markdownView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+    let markdownView = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
     if (!markdownView) {
       this.app.workspace.iterateAllLeaves((leaf) => {
-        if (!markdownView && leaf.view instanceof import_obsidian4.MarkdownView) {
+        if (!markdownView && leaf.view instanceof import_obsidian5.MarkdownView) {
           markdownView = leaf.view;
         }
       });
     }
     if (!markdownView || !markdownView.file) {
-      new import_obsidian4.Notice(t("error.noActiveFile"));
+      new import_obsidian5.Notice(t("error.noActiveFile"));
       return false;
     }
     try {
       await this.app.vault.modify(markdownView.file, newContent);
-      new import_obsidian4.Notice(t("chat.fileUpdated"));
+      new import_obsidian5.Notice(t("chat.fileUpdated"));
       return true;
     } catch (error) {
       console.error("Failed to apply edit:", error);
-      new import_obsidian4.Notice(t("error.editFailed"));
+      new import_obsidian5.Notice(t("error.editFailed"));
       return false;
     }
   }
 };
 
 // src/commands/summarize.ts
-var import_obsidian5 = require("obsidian");
+var import_obsidian6 = require("obsidian");
 function registerSummarizeCommand(plugin) {
   plugin.addCommand({
     id: "summarize",
@@ -1193,12 +1603,12 @@ function registerSummarizeCommand(plugin) {
     callback: async () => {
       const context = getContext(plugin.app);
       if (!context) {
-        new import_obsidian5.Notice(t("notice.openNote"));
+        new import_obsidian6.Notice(t("notice.openNote"));
         return;
       }
       const chatView = await plugin.activateChatView();
       if (!chatView) {
-        new import_obsidian5.Notice(t("notice.cannotOpenChat"));
+        new import_obsidian6.Notice(t("notice.cannotOpenChat"));
         return;
       }
       await chatView.sendPromptWithContext(plugin.settings.prompts.summarize);
@@ -1207,7 +1617,7 @@ function registerSummarizeCommand(plugin) {
 }
 
 // src/commands/rewrite.ts
-var import_obsidian6 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 function registerRewriteCommand(plugin) {
   plugin.addCommand({
     id: "rewrite",
@@ -1215,12 +1625,12 @@ function registerRewriteCommand(plugin) {
     editorCallback: async (editor) => {
       const selection = editor.getSelection();
       if (!selection) {
-        new import_obsidian6.Notice(t("notice.selectContent"));
+        new import_obsidian7.Notice(t("notice.selectContent"));
         return;
       }
       const chatView = await plugin.activateChatView();
       if (!chatView) {
-        new import_obsidian6.Notice(t("notice.cannotOpenChat"));
+        new import_obsidian7.Notice(t("notice.cannotOpenChat"));
         return;
       }
       await chatView.sendPromptWithContext(plugin.settings.prompts.rewrite, true);
@@ -1229,8 +1639,8 @@ function registerRewriteCommand(plugin) {
 }
 
 // src/commands/ask.ts
-var import_obsidian7 = require("obsidian");
-var AskModal = class extends import_obsidian7.Modal {
+var import_obsidian8 = require("obsidian");
+var AskModal = class extends import_obsidian8.Modal {
   constructor(app, plugin) {
     super(app);
     this.question = "";
@@ -1269,13 +1679,13 @@ var AskModal = class extends import_obsidian7.Modal {
   }
   async submitQuestion() {
     if (!this.question.trim()) {
-      new import_obsidian7.Notice(t("notice.enterQuestion"));
+      new import_obsidian8.Notice(t("notice.enterQuestion"));
       return;
     }
     this.close();
     const chatView = await this.plugin.activateChatView();
     if (!chatView) {
-      new import_obsidian7.Notice(t("notice.cannotOpenChat"));
+      new import_obsidian8.Notice(t("notice.cannotOpenChat"));
       return;
     }
     const prompt = this.plugin.settings.prompts.ask.replace("{{question}}", this.question.trim());
@@ -1293,7 +1703,7 @@ function registerAskCommand(plugin) {
     callback: async () => {
       const context = getContext(plugin.app);
       if (!context) {
-        new import_obsidian7.Notice(t("notice.openNote"));
+        new import_obsidian8.Notice(t("notice.openNote"));
         return;
       }
       new AskModal(plugin.app, plugin).open();
@@ -1302,7 +1712,7 @@ function registerAskCommand(plugin) {
 }
 
 // src/main.ts
-var ClauwritePlugin = class extends import_obsidian8.Plugin {
+var ClauwritePlugin = class extends import_obsidian9.Plugin {
   async onload() {
     await this.loadSettings();
     setLanguage(this.settings.uiLanguage);
@@ -1362,18 +1772,18 @@ var ClauwritePlugin = class extends import_obsidian8.Plugin {
     return null;
   }
   async handleFirstLoad() {
-    if (import_obsidian8.Platform.isDesktop) {
+    if (import_obsidian9.Platform.isDesktop) {
       const cliAvailable = await this.detectClaudeCodeCli();
       if (cliAvailable) {
         this.settings.authMode = "claude-code";
-        new import_obsidian8.Notice("Clauwrite: " + t("notice.cliDetected"));
+        new import_obsidian9.Notice("Clauwrite: " + t("notice.cliDetected"));
       } else {
         this.settings.authMode = "api-key";
-        new import_obsidian8.Notice("Clauwrite: " + t("notice.enterApiKey"));
+        new import_obsidian9.Notice("Clauwrite: " + t("notice.enterApiKey"));
       }
     } else {
       this.settings.authMode = "api-key";
-      new import_obsidian8.Notice("Clauwrite: " + t("notice.mobileApiKey"));
+      new import_obsidian9.Notice("Clauwrite: " + t("notice.mobileApiKey"));
     }
     this.settings.isFirstLoad = false;
     await this.saveSettings();

@@ -46,6 +46,9 @@ const translations = {
     'settings.clearHistory.desc': '刪除所有儲存的對話記錄',
     'settings.clearHistory.button': '清除',
     'settings.clearHistory.done': '已清除對話歷史',
+    'settings.agentic': 'Agentic 模式',
+    'settings.agentic.enable': '啟用 Agentic 模式',
+    'settings.agentic.desc': '允許 Claude 自動讀取、創建、編輯和搜尋筆記',
 
     // Chat View
     'chat.title': 'Clauwrite',
@@ -62,6 +65,8 @@ const translations = {
     'chat.newChat': '新對話',
     'chat.clearConfirm': '確定要清除對話歷史嗎？',
     'chat.fileUpdated': '檔案已更新',
+    'chat.toolExecuting': '執行工具中...',
+    'chat.toolResult': '工具結果',
 
     // Commands
     'command.openChat': '開啟對話視窗',
@@ -144,6 +149,9 @@ const translations = {
     'settings.clearHistory.desc': 'Delete all saved conversation history',
     'settings.clearHistory.button': 'Clear',
     'settings.clearHistory.done': 'Conversation history cleared',
+    'settings.agentic': 'Agentic Mode',
+    'settings.agentic.enable': 'Enable Agentic Mode',
+    'settings.agentic.desc': 'Allow Claude to read, create, edit, and search notes automatically',
 
     // Chat View
     'chat.title': 'Clauwrite',
@@ -160,6 +168,8 @@ const translations = {
     'chat.newChat': 'New Chat',
     'chat.clearConfirm': 'Clear conversation history?',
     'chat.fileUpdated': 'File updated',
+    'chat.toolExecuting': 'Executing tool...',
+    'chat.toolResult': 'Tool result',
 
     // Commands
     'command.openChat': 'Open Chat',
@@ -207,7 +217,7 @@ export function setLanguage(lang: Language): void {
 }
 
 export function t(key: TranslationKey, params?: Record<string, string>): string {
-  let text = translations[currentLanguage][key] || translations['zh-TW'][key] || key;
+  let text: string = translations[currentLanguage][key] || translations['zh-TW'][key] || key;
 
   if (params) {
     Object.entries(params).forEach(([k, v]) => {

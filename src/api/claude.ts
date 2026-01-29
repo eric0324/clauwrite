@@ -1,6 +1,7 @@
 import type { ClauwriteSettings, ConversationMessage } from '../settings';
 import { AnthropicApiClient } from './anthropic-api';
 import { ClaudeCodeClient } from './claude-code-cli';
+import { buildAgenticSystemPrompt } from '../utils/agent-tools';
 
 export interface FileInfo {
   path?: string;
@@ -31,5 +32,12 @@ export function buildSystemPrompt(settings: ClauwriteSettings): string {
     ? 'Respond in Traditional Chinese (繁體中文).'
     : 'Respond in English.';
 
-  return `${settings.prompts.system}\n${langInstruction}`;
+  const basePrompt = `${settings.prompts.system}\n${langInstruction}`;
+
+  // Add agentic tools documentation if agentic mode is enabled
+  if (settings.agenticMode) {
+    return buildAgenticSystemPrompt(basePrompt);
+  }
+
+  return basePrompt;
 }
