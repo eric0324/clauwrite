@@ -19,7 +19,5 @@ export function buildSystemPrompt(settings: ClauwriteSettings): string {
     ? 'Respond in Traditional Chinese (繁體中文).'
     : 'Respond in English.';
 
-  return `You are an Obsidian note assistant. Help users with their notes.
-${langInstruction}
-Use Markdown formatting. Keep responses concise and well-organized.`;
+  return `${settings.prompts.system}\n${langInstruction}`;
 }

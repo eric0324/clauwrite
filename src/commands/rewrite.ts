@@ -20,7 +20,7 @@ export function registerRewriteCommand(plugin: ClauwritePlugin): void {
         return;
       }
 
-      await chatView.sendPromptWithContext(t('prompt.rewrite'), true);
+      await chatView.sendPromptWithContext(plugin.settings.prompts.rewrite, true);
     },
   });
 }

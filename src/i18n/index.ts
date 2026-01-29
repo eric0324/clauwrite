@@ -29,6 +29,16 @@ const translations = {
     'settings.language.desc': '插件介面的顯示語言',
     'settings.responseLanguage': '回應語言',
     'settings.responseLanguage.desc': 'Claude 回應的語言',
+    'settings.prompts': 'Prompt 模板',
+    'settings.prompts.system': 'System Prompt',
+    'settings.prompts.system.desc': '系統提示詞，定義 Claude 的角色和行為',
+    'settings.prompts.summarize': '摘要 Prompt',
+    'settings.prompts.summarize.desc': '摘要功能的提示詞',
+    'settings.prompts.rewrite': '改寫 Prompt',
+    'settings.prompts.rewrite.desc': '改寫功能的提示詞',
+    'settings.prompts.ask': '詢問 Prompt',
+    'settings.prompts.ask.desc': '詢問功能的提示詞，使用 {{question}} 代表問題',
+    'settings.prompts.reset': '重設為預設',
 
     // Chat View
     'chat.title': 'Clauwrite',
@@ -105,6 +115,16 @@ const translations = {
     'settings.language.desc': 'Language for plugin interface',
     'settings.responseLanguage': 'Response Language',
     'settings.responseLanguage.desc': 'Language for Claude responses',
+    'settings.prompts': 'Prompt Templates',
+    'settings.prompts.system': 'System Prompt',
+    'settings.prompts.system.desc': 'System prompt that defines Claude\'s role and behavior',
+    'settings.prompts.summarize': 'Summarize Prompt',
+    'settings.prompts.summarize.desc': 'Prompt for summarize function',
+    'settings.prompts.rewrite': 'Rewrite Prompt',
+    'settings.prompts.rewrite.desc': 'Prompt for rewrite function',
+    'settings.prompts.ask': 'Ask Prompt',
+    'settings.prompts.ask.desc': 'Prompt for ask function, use {{question}} as placeholder',
+    'settings.prompts.reset': 'Reset to Default',
 
     // Chat View
     'chat.title': 'Clauwrite',

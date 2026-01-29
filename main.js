@@ -246,9 +246,8 @@ function createClaudeClient(settings) {
 }
 function buildSystemPrompt(settings) {
   const langInstruction = settings.responseLanguage === "zh-TW" ? "Respond in Traditional Chinese (\u7E41\u9AD4\u4E2D\u6587)." : "Respond in English.";
-  return `You are an Obsidian note assistant. Help users with their notes.
-${langInstruction}
-Use Markdown formatting. Keep responses concise and well-organized.`;
+  return `${settings.prompts.system}
+${langInstruction}`;
 }
 
 // src/i18n/index.ts
@@ -281,6 +280,16 @@ var translations = {
     "settings.language.desc": "\u63D2\u4EF6\u4ECB\u9762\u7684\u986F\u793A\u8A9E\u8A00",
     "settings.responseLanguage": "\u56DE\u61C9\u8A9E\u8A00",
     "settings.responseLanguage.desc": "Claude \u56DE\u61C9\u7684\u8A9E\u8A00",
+    "settings.prompts": "Prompt \u6A21\u677F",
+    "settings.prompts.system": "System Prompt",
+    "settings.prompts.system.desc": "\u7CFB\u7D71\u63D0\u793A\u8A5E\uFF0C\u5B9A\u7FA9 Claude \u7684\u89D2\u8272\u548C\u884C\u70BA",
+    "settings.prompts.summarize": "\u6458\u8981 Prompt",
+    "settings.prompts.summarize.desc": "\u6458\u8981\u529F\u80FD\u7684\u63D0\u793A\u8A5E",
+    "settings.prompts.rewrite": "\u6539\u5BEB Prompt",
+    "settings.prompts.rewrite.desc": "\u6539\u5BEB\u529F\u80FD\u7684\u63D0\u793A\u8A5E",
+    "settings.prompts.ask": "\u8A62\u554F Prompt",
+    "settings.prompts.ask.desc": "\u8A62\u554F\u529F\u80FD\u7684\u63D0\u793A\u8A5E\uFF0C\u4F7F\u7528 {{question}} \u4EE3\u8868\u554F\u984C",
+    "settings.prompts.reset": "\u91CD\u8A2D\u70BA\u9810\u8A2D",
     // Chat View
     "chat.title": "Clauwrite",
     "chat.context": "Context",
@@ -351,6 +360,16 @@ var translations = {
     "settings.language.desc": "Language for plugin interface",
     "settings.responseLanguage": "Response Language",
     "settings.responseLanguage.desc": "Language for Claude responses",
+    "settings.prompts": "Prompt Templates",
+    "settings.prompts.system": "System Prompt",
+    "settings.prompts.system.desc": "System prompt that defines Claude's role and behavior",
+    "settings.prompts.summarize": "Summarize Prompt",
+    "settings.prompts.summarize.desc": "Prompt for summarize function",
+    "settings.prompts.rewrite": "Rewrite Prompt",
+    "settings.prompts.rewrite.desc": "Prompt for rewrite function",
+    "settings.prompts.ask": "Ask Prompt",
+    "settings.prompts.ask.desc": "Prompt for ask function, use {{question}} as placeholder",
+    "settings.prompts.reset": "Reset to Default",
     // Chat View
     "chat.title": "Clauwrite",
     "chat.context": "Context",
@@ -409,6 +428,12 @@ function t(key, params) {
 }
 
 // src/settings.ts
+var DEFAULT_PROMPTS = {
+  system: "You are an Obsidian note assistant. Help users with their notes.\nUse Markdown formatting. Keep responses concise and well-organized.",
+  summarize: "Please provide a concise summary of the following content:",
+  rewrite: "Please rewrite the following content to be clearer and more readable while preserving the meaning:",
+  ask: "Answer the question based on the following content.\n\nQuestion: {{question}}"
+};
 var DEFAULT_SETTINGS = {
   authMode: "claude-code",
   apiKey: "",
@@ -417,6 +442,7 @@ var DEFAULT_SETTINGS = {
   maxTokens: 4096,
   uiLanguage: "zh-TW",
   responseLanguage: "zh-TW",
+  prompts: { ...DEFAULT_PROMPTS },
   isFirstLoad: true
 };
 var AVAILABLE_MODELS = [
@@ -457,6 +483,9 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
     containerEl.createEl("h3", { text: t("settings.preferences") });
     this.renderUiLanguageSetting(containerEl);
     this.renderResponseLanguageSetting(containerEl);
+    containerEl.createEl("hr");
+    containerEl.createEl("h3", { text: t("settings.prompts") });
+    this.renderPromptSettings(containerEl);
   }
   renderAuthModeSection(containerEl) {
     new import_obsidian2.Setting(containerEl).setName(t("settings.authMode")).setDesc(t("settings.authMode.desc")).addDropdown((dropdown) => {
@@ -571,6 +600,47 @@ var ClauwriteSettingTab = class extends import_obsidian2.PluginSettingTab {
       dropdown.addOption("zh-TW", "\u7E41\u9AD4\u4E2D\u6587").addOption("en", "English").setValue(this.plugin.settings.responseLanguage).onChange(async (value) => {
         this.plugin.settings.responseLanguage = value;
         await this.plugin.saveSettings();
+      });
+    });
+  }
+  renderPromptSettings(containerEl) {
+    new import_obsidian2.Setting(containerEl).setName(t("settings.prompts.system")).setDesc(t("settings.prompts.system.desc")).addTextArea((text) => {
+      text.setValue(this.plugin.settings.prompts.system).onChange(async (value) => {
+        this.plugin.settings.prompts.system = value;
+        await this.plugin.saveSettings();
+      });
+      text.inputEl.rows = 3;
+      text.inputEl.cols = 40;
+    });
+    new import_obsidian2.Setting(containerEl).setName(t("settings.prompts.summarize")).setDesc(t("settings.prompts.summarize.desc")).addTextArea((text) => {
+      text.setValue(this.plugin.settings.prompts.summarize).onChange(async (value) => {
+        this.plugin.settings.prompts.summarize = value;
+        await this.plugin.saveSettings();
+      });
+      text.inputEl.rows = 2;
+      text.inputEl.cols = 40;
+    });
+    new import_obsidian2.Setting(containerEl).setName(t("settings.prompts.rewrite")).setDesc(t("settings.prompts.rewrite.desc")).addTextArea((text) => {
+      text.setValue(this.plugin.settings.prompts.rewrite).onChange(async (value) => {
+        this.plugin.settings.prompts.rewrite = value;
+        await this.plugin.saveSettings();
+      });
+      text.inputEl.rows = 2;
+      text.inputEl.cols = 40;
+    });
+    new import_obsidian2.Setting(containerEl).setName(t("settings.prompts.ask")).setDesc(t("settings.prompts.ask.desc")).addTextArea((text) => {
+      text.setValue(this.plugin.settings.prompts.ask).onChange(async (value) => {
+        this.plugin.settings.prompts.ask = value;
+        await this.plugin.saveSettings();
+      });
+      text.inputEl.rows = 2;
+      text.inputEl.cols = 40;
+    });
+    new import_obsidian2.Setting(containerEl).addButton((button) => {
+      button.setButtonText(t("settings.prompts.reset")).onClick(async () => {
+        this.plugin.settings.prompts = { ...DEFAULT_PROMPTS };
+        await this.plugin.saveSettings();
+        this.display();
       });
     });
   }
@@ -870,7 +940,7 @@ function registerSummarizeCommand(plugin) {
         new import_obsidian5.Notice(t("notice.cannotOpenChat"));
         return;
       }
-      await chatView.sendPromptWithContext(t("prompt.summarize"));
+      await chatView.sendPromptWithContext(plugin.settings.prompts.summarize);
     }
   });
 }
@@ -892,7 +962,7 @@ function registerRewriteCommand(plugin) {
         new import_obsidian6.Notice(t("notice.cannotOpenChat"));
         return;
       }
-      await chatView.sendPromptWithContext(t("prompt.rewrite"), true);
+      await chatView.sendPromptWithContext(plugin.settings.prompts.rewrite, true);
     }
   });
 }
@@ -947,7 +1017,7 @@ var AskModal = class extends import_obsidian7.Modal {
       new import_obsidian7.Notice(t("notice.cannotOpenChat"));
       return;
     }
-    const prompt = t("prompt.ask", { question: this.question.trim() });
+    const prompt = this.plugin.settings.prompts.ask.replace("{{question}}", this.question.trim());
     await chatView.sendPromptWithContext(prompt);
   }
   onClose() {

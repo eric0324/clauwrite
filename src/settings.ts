@@ -6,6 +6,13 @@ import { t, setLanguage } from './i18n';
 export type AuthMode = 'api-key' | 'claude-code';
 export type Language = 'zh-TW' | 'en';
 
+export interface PromptTemplates {
+  system: string;
+  summarize: string;
+  rewrite: string;
+  ask: string;
+}
+
 export interface ClauwriteSettings {
   authMode: AuthMode;
   apiKey: string;
@@ -14,8 +21,16 @@ export interface ClauwriteSettings {
   maxTokens: number;
   uiLanguage: Language;
   responseLanguage: Language;
+  prompts: PromptTemplates;
   isFirstLoad: boolean;
 }
+
+export const DEFAULT_PROMPTS: PromptTemplates = {
+  system: 'You are an Obsidian note assistant. Help users with their notes.\nUse Markdown formatting. Keep responses concise and well-organized.',
+  summarize: 'Please provide a concise summary of the following content:',
+  rewrite: 'Please rewrite the following content to be clearer and more readable while preserving the meaning:',
+  ask: 'Answer the question based on the following content.\n\nQuestion: {{question}}',
+};
 
 export const DEFAULT_SETTINGS: ClauwriteSettings = {
   authMode: 'claude-code',
@@ -25,6 +40,7 @@ export const DEFAULT_SETTINGS: ClauwriteSettings = {
   maxTokens: 4096,
   uiLanguage: 'zh-TW',
   responseLanguage: 'zh-TW',
+  prompts: { ...DEFAULT_PROMPTS },
   isFirstLoad: true,
 };
 
@@ -92,6 +108,13 @@ export class ClauwriteSettingTab extends PluginSettingTab {
 
     // Response Language
     this.renderResponseLanguageSetting(containerEl);
+
+    // Separator
+    containerEl.createEl('hr');
+    containerEl.createEl('h3', { text: t('settings.prompts') });
+
+    // Prompt Templates
+    this.renderPromptSettings(containerEl);
   }
 
   private renderAuthModeSection(containerEl: HTMLElement): void {
@@ -267,6 +290,80 @@ export class ClauwriteSettingTab extends PluginSettingTab {
           .onChange(async (value: Language) => {
             this.plugin.settings.responseLanguage = value;
             await this.plugin.saveSettings();
+          });
+      });
+  }
+
+  private renderPromptSettings(containerEl: HTMLElement): void {
+    // System Prompt
+    new Setting(containerEl)
+      .setName(t('settings.prompts.system'))
+      .setDesc(t('settings.prompts.system.desc'))
+      .addTextArea((text) => {
+        text
+          .setValue(this.plugin.settings.prompts.system)
+          .onChange(async (value) => {
+            this.plugin.settings.prompts.system = value;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.rows = 3;
+        text.inputEl.cols = 40;
+      });
+
+    // Summarize Prompt
+    new Setting(containerEl)
+      .setName(t('settings.prompts.summarize'))
+      .setDesc(t('settings.prompts.summarize.desc'))
+      .addTextArea((text) => {
+        text
+          .setValue(this.plugin.settings.prompts.summarize)
+          .onChange(async (value) => {
+            this.plugin.settings.prompts.summarize = value;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.rows = 2;
+        text.inputEl.cols = 40;
+      });
+
+    // Rewrite Prompt
+    new Setting(containerEl)
+      .setName(t('settings.prompts.rewrite'))
+      .setDesc(t('settings.prompts.rewrite.desc'))
+      .addTextArea((text) => {
+        text
+          .setValue(this.plugin.settings.prompts.rewrite)
+          .onChange(async (value) => {
+            this.plugin.settings.prompts.rewrite = value;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.rows = 2;
+        text.inputEl.cols = 40;
+      });
+
+    // Ask Prompt
+    new Setting(containerEl)
+      .setName(t('settings.prompts.ask'))
+      .setDesc(t('settings.prompts.ask.desc'))
+      .addTextArea((text) => {
+        text
+          .setValue(this.plugin.settings.prompts.ask)
+          .onChange(async (value) => {
+            this.plugin.settings.prompts.ask = value;
+            await this.plugin.saveSettings();
+          });
+        text.inputEl.rows = 2;
+        text.inputEl.cols = 40;
+      });
+
+    // Reset Button
+    new Setting(containerEl)
+      .addButton((button) => {
+        button
+          .setButtonText(t('settings.prompts.reset'))
+          .onClick(async () => {
+            this.plugin.settings.prompts = { ...DEFAULT_PROMPTS };
+            await this.plugin.saveSettings();
+            this.display();
           });
       });
   }

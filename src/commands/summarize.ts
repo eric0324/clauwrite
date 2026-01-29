@@ -21,7 +21,7 @@ export function registerSummarizeCommand(plugin: ClauwritePlugin): void {
         return;
       }
 
-      await chatView.sendPromptWithContext(t('prompt.summarize'));
+      await chatView.sendPromptWithContext(plugin.settings.prompts.summarize);
     },
   });
 }

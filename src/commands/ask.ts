@@ -64,7 +64,7 @@ class AskModal extends Modal {
       return;
     }
 
-    const prompt = t('prompt.ask', { question: this.question.trim() });
+    const prompt = this.plugin.settings.prompts.ask.replace('{{question}}', this.question.trim());
 
     await chatView.sendPromptWithContext(prompt);
   }
