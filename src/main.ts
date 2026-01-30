@@ -90,7 +90,7 @@ export default class ClauwritePlugin extends Plugin {
     }
 
     if (leaf) {
-      workspace.revealLeaf(leaf);
+      void workspace.revealLeaf(leaf);
       return leaf.view as ChatView;
     }
 

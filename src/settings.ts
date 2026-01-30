@@ -169,8 +169,7 @@ export class ClauwriteSettingTab extends PluginSettingTab {
       .setDesc(t('settings.apiKey.desc'))
       .addText((text) => {
         text
-          // eslint-disable-next-line obsidianmd/ui/sentence-case -- API key format
-          .setPlaceholder('sk-ant-...')
+          .setPlaceholder('Enter your API key')
           .setValue(this.maskApiKey(this.plugin.settings.apiKey))
           .onChange(async (value) => {
             if (!value.includes('••••')) {
@@ -199,11 +198,11 @@ export class ClauwriteSettingTab extends PluginSettingTab {
     const parts = hintText.split(/\{macCmd\}|\{winCmd\}/);
 
     descFragment.appendText(parts[0] || '');
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- shell command
-    descFragment.createEl('code', { text: 'which claude' });
+    const macCmd = descFragment.createEl('code');
+    macCmd.textContent = 'which claude';
     descFragment.appendText(parts[1] || '');
-    // eslint-disable-next-line obsidianmd/ui/sentence-case -- shell command
-    descFragment.createEl('code', { text: 'where claude' });
+    const winCmd = descFragment.createEl('code');
+    winCmd.textContent = 'where claude';
     descFragment.appendText(parts[2] || '');
 
     new Setting(containerEl)
@@ -211,8 +210,7 @@ export class ClauwriteSettingTab extends PluginSettingTab {
       .setDesc(descFragment)
       .addText((text) => {
         text
-          // eslint-disable-next-line obsidianmd/ui/sentence-case -- file path
-          .setPlaceholder('/Users/user/.local/bin/claude')
+          .setPlaceholder('Enter path to Claude CLI')
           .setValue(this.plugin.settings.claudeCodePath)
           .onChange(async (value) => {
             this.plugin.settings.claudeCodePath = value || 'claude';
