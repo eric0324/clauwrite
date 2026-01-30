@@ -210,7 +210,7 @@ export class ClauwriteSettingTab extends PluginSettingTab {
       .setDesc(descFragment)
       .addText((text) => {
         text
-          .setPlaceholder('claude')
+          .setPlaceholder('Claude')
           .setValue(this.plugin.settings.claudeCodePath)
           .onChange(async (value) => {
             this.plugin.settings.claudeCodePath = value || 'claude';
