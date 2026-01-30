@@ -197,12 +197,12 @@ export class ClauwriteSettingTab extends PluginSettingTab {
     const hintText = t('settings.cliPath.hint', { macCmd: '', winCmd: '' });
     const parts = hintText.split(/\{macCmd\}|\{winCmd\}/);
 
+    const WHICH_CMD = 'which claude';
+    const WHERE_CMD = 'where claude';
     descFragment.appendText(parts[0] || '');
-    const macCmd = descFragment.createEl('code');
-    macCmd.textContent = 'which claude';
+    descFragment.createEl('code', { text: WHICH_CMD });
     descFragment.appendText(parts[1] || '');
-    const winCmd = descFragment.createEl('code');
-    winCmd.textContent = 'where claude';
+    descFragment.createEl('code', { text: WHERE_CMD });
     descFragment.appendText(parts[2] || '');
 
     new Setting(containerEl)
@@ -210,7 +210,7 @@ export class ClauwriteSettingTab extends PluginSettingTab {
       .setDesc(descFragment)
       .addText((text) => {
         text
-          .setPlaceholder('Enter path to Claude CLI')
+          .setPlaceholder('claude')
           .setValue(this.plugin.settings.claudeCodePath)
           .onChange(async (value) => {
             this.plugin.settings.claudeCodePath = value || 'claude';
